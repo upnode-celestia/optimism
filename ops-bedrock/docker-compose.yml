@@ -120,6 +120,8 @@ services:
       BATCH_SUBMITTER_SEQUENCER_GENESIS_HASH: "${SEQUENCER_GENESIS_HASH}"
       BATCH_SUBMITTER_SEQUENCER_BATCH_INBOX_ADDRESS: "${SEQUENCER_BATCH_INBOX_ADDRESS}"
       BATCH_SUBMITTER_LOG_TERMINAL: "true"
+    networks:
+      localnet:
 
   stateviz:
     build:
@@ -138,9 +140,4 @@ services:
 networks:
   localnet:
     name: localnet
-    driver: bridge
-    ipam:
-      driver: default
-      config:
-      -
-        subnet: 192.167.0.0/16
+    external: true
