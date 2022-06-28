@@ -20,6 +20,8 @@ services:
     volumes:
       - "l1_data:/db"
       - ${PWD}/../.devnet/genesis-l1.json:/genesis.json
+    networks:
+      localnet:
 
   l2:
     build:
@@ -35,6 +37,8 @@ services:
       - "/bin/sh"
       - "/entrypoint.sh"
       - "--authrpc.jwtsecret=/config/test-jwt-secret.txt"
+    networks:
+      localnet:
 
   op-node:
     depends_on:
@@ -73,6 +77,8 @@ services:
       - ${PWD}/test-jwt-secret.txt:/config/test-jwt-secret.txt
       - ${PWD}/../.devnet/rollup.json:/rollup.json
       - op_log:/op_log
+    networks:
+      localnet:
 
   op-proposer:
     depends_on:
@@ -94,6 +100,8 @@ services:
       OUTPUT_SUBMITTER_L2_OUTPUT_HD_PATH: "m/44'/60'/0'/0/1"
       OUTPUT_SUBMITTER_LOG_TERMINAL: "true"
       L2OO_ADDRESS: "${L2OO_ADDRESS}"
+    networks:
+      localnet:
 
   op-batcher:
     depends_on:
