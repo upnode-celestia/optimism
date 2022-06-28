@@ -38,14 +38,14 @@ services:
 
   op-node:
     depends_on:
-      - l1
+      # - l1
       - l2
     build:
       context: ../
       dockerfile: ./ops-bedrock/Dockerfile.node
     command: >
       op-node
-      --l1=ws://l1:8546
+      --l1=ws://192.167.4.0:8546
       --l2=ws://l2:8546
       --l2.jwt-secret=/config/test-jwt-secret.txt
       --sequencer.enabled
@@ -76,14 +76,14 @@ services:
 
   op-proposer:
     depends_on:
-      - l1
+      # - l1
       - l2
       - op-node
     build:
       context: ../
       dockerfile: ./ops-bedrock/Dockerfile.proposer
     environment:
-      L1_ETH_RPC: http://l1:8545
+      L1_ETH_RPC: http://192.167.4.0:8545
       L2_ETH_RPC: http://l2:8545
       ROLLUP_RPC: http://op-node:8545
       OUTPUT_SUBMITTER_POLL_INTERVAL: 10s
@@ -97,14 +97,14 @@ services:
 
   op-batcher:
     depends_on:
-      - l1
+      # - l1
       - l2
       - op-node
     build:
       context: ../
       dockerfile: ./ops-bedrock/Dockerfile.batcher
     environment:
-      L1_ETH_RPC: http://l1:8545
+      L1_ETH_RPC: http://192.167.4.0:8545
       L2_ETH_RPC: http://l2:8545
       ROLLUP_RPC: http://op-node:8545
       BATCH_SUBMITTER_MIN_L1_TX_SIZE_BYTES: 1
@@ -134,3 +134,13 @@ services:
       - "9090:8080"
     volumes:
       - op_log:/op_log:ro
+
+networks:
+  localnet:
+    name: localnet
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+      -
+        subnet: 192.167.0.0/16
