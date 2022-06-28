@@ -76,13 +76,13 @@ if [ ! -f ./.devnet/genesis-l1.json ]; then
 fi
 
 # Bring up L1.
-(
-  cd ops-bedrock
-  echo "Bringing up L1..."
-  DOCKER_BUILDKIT=1 docker compose build
-  docker compose up -d l1
-  wait_up $L1_URL
-)
+# (
+#   cd ops-bedrock
+#   echo "Bringing up L1..."
+#   DOCKER_BUILDKIT=1 docker compose build
+#   docker compose up -d l1
+#   wait_up $L1_URL
+# )
 
 # Deploy contracts using Hardhat.
 if [ ! -d $CONTRACTS_BEDROCK/deployments/$NETWORK ]; then
