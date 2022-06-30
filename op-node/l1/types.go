@@ -109,6 +109,7 @@ func (header *rpcHeader) Info(trustCache bool) (*HeaderInfo, error) {
 		txHash:      header.header.TxHash,
 		receiptHash: header.header.ReceiptHash,
 	}
+	fmt.Printf("header:\n%#+v", header.header)
 	if !trustCache {
 		if computed := header.header.Hash(); computed != info.hash {
 			return nil, fmt.Errorf("failed to verify block hash: computed %s but RPC said %s", computed, info.hash)
