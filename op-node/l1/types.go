@@ -91,6 +91,8 @@ type rpcHeader struct {
 }
 
 func (header *rpcHeader) UnmarshalJSON(msg []byte) error {
+	fmt.Println("msg")
+	fmt.Println(string(msg))
 	if err := json.Unmarshal(msg, &header.header); err != nil {
 		return err
 	}
