@@ -109,7 +109,11 @@ func (header *rpcHeader) Info(trustCache bool) (*HeaderInfo, error) {
 		txHash:      header.header.TxHash,
 		receiptHash: header.header.ReceiptHash,
 	}
+	headerCacheJson, _ := json.MarshalIndent(header.cache, "", "  ")
+	fmt.Println("header.cache")
+	fmt.Println(string(headerCacheJson))
 	headerJson, _ := json.MarshalIndent(header.header, "", "  ")
+	fmt.Println("header.header")
 	fmt.Println(string(headerJson))
 	if !trustCache {
 		if computed := header.header.Hash(); computed != info.hash {
