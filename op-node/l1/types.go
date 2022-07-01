@@ -96,7 +96,9 @@ func (header *rpcHeader) UnmarshalJSON(msg []byte) error {
 	if err := json.Unmarshal(msg, &header.header); err != nil {
 		return err
 	}
-	return json.Unmarshal(msg, &header.cache)
+	header.cache.Hash = header.header.Hash()
+	return nil
+	// return json.Unmarshal(msg, &header.cache)
 }
 
 func (header *rpcHeader) Info(trustCache bool) (*HeaderInfo, error) {
