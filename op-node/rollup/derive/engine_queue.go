@@ -278,6 +278,7 @@ func (eq *EngineQueue) ResetStep(ctx context.Context, l1Fetcher L1Fetcher) error
 		eq.safeHead = head
 		return nil
 	}
+	eq.log.Info("eq.safeHead.L1Origin.Number", "safeHead", eq.safeHead)
 
 	// check if the block origin is canonical
 	if canonicalRef, err := l1Fetcher.L1BlockRefByNumber(ctx, eq.safeHead.L1Origin.Number); errors.Is(err, ethereum.NotFound) {
