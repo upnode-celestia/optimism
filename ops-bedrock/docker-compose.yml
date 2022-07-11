@@ -44,6 +44,9 @@ services:
     depends_on:
       # - l1
       - l2
+    image: op-node:local-0
+    environment:
+      L1_TRUST_RPC: true
     build:
       context: ../
       dockerfile: ./ops-bedrock/Dockerfile.node
