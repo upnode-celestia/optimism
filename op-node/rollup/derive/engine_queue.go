@@ -263,7 +263,6 @@ func (eq *EngineQueue) forceNextSafeAttributes(ctx context.Context) error {
 // The unsafe head is set to the head of the L2 chain, unless the existing safe head is not canonical.
 func (eq *EngineQueue) ResetStep(ctx context.Context, l1Fetcher L1Fetcher) error {
 	if !eq.resetting {
-		eq.log.Info("resetting")
 		eq.resetting = true
 
 		head, err := eq.engine.L2BlockRefHead(ctx)
@@ -280,7 +279,7 @@ func (eq *EngineQueue) ResetStep(ctx context.Context, l1Fetcher L1Fetcher) error
 		eq.safeHead = head
 		return nil
 	}
-	eq.log.Info("eq.safeHead.L1Origin.Number", "safeHead", eq.safeHead)
+	eq.log.Info("eq.safeHead", "safeHead", eq.safeHead)
 
 	// check if the block origin is canonical
 	if canonicalRef, err := l1Fetcher.L1BlockRefByNumber(ctx, eq.safeHead.L1Origin.Number); errors.Is(err, ethereum.NotFound) {
@@ -290,6 +289,7 @@ func (eq *EngineQueue) ResetStep(ctx context.Context, l1Fetcher L1Fetcher) error
 		eq.log.Warn("failed to get L1 block ref to check if origin of l2 block is canonical", "err", err, "num", eq.safeHead.L1Origin.Number)
 	} else {
 		// if we find the safe head, then we found the canon chain
+		eq.log.Info("canonicalRef", "canonicalRef", canonicalRef)
 		if canonicalRef.Hash == eq.safeHead.L1Origin.Hash {
 			eq.resetting = false
 			// if the unsafe head was broken, then restore it to start from the safe head
