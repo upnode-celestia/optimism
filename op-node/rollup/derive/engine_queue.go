@@ -263,6 +263,7 @@ func (eq *EngineQueue) forceNextSafeAttributes(ctx context.Context) error {
 // The unsafe head is set to the head of the L2 chain, unless the existing safe head is not canonical.
 func (eq *EngineQueue) ResetStep(ctx context.Context, l1Fetcher L1Fetcher) error {
 	if !eq.resetting {
+		eq.log.Info("resetting")
 		eq.resetting = true
 
 		head, err := eq.engine.L2BlockRefHead(ctx)
@@ -270,6 +271,7 @@ func (eq *EngineQueue) ResetStep(ctx context.Context, l1Fetcher L1Fetcher) error
 			eq.log.Error("failed to get L2 engine head to start finding reset point from", "err", err)
 			return nil
 		}
+		eq.log.Info("reset head", "head", head)
 		eq.unsafeHead = head
 
 		// TODO: this should be different for safe head.
