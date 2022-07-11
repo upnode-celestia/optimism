@@ -104,7 +104,10 @@ func (s *state) Start(ctx context.Context) error {
 		return err
 	}
 	s.l1Head = l1Head
+	s.log.Info("l1Head", "l1Head", s.l1Head)
+
 	s.l2Head, _ = s.l2.L2BlockRefByNumber(ctx, nil)
+	s.log.Info("L2BlockRefByNumber", "l2Head", s.l2Head)
 
 	s.derivation.Reset()
 
