@@ -96,8 +96,6 @@ func (header *rpcHeader) UnmarshalJSON(msg []byte) error {
 	if err := json.Unmarshal(msg, &header.header); err != nil {
 		return err
 	}
-	// header.cache.Hash = header.header.Hash()
-	// return nil
 	return json.Unmarshal(msg, &header.cache)
 }
 
