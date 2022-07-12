@@ -292,6 +292,8 @@ func (eq *EngineQueue) ResetStep(ctx context.Context, l1Fetcher L1Fetcher) error
 		eq.log.Info("canonicalRef", "canonicalRef", canonicalRef)
 		// if we find the safe head, then we found the canon chain
 		if canonicalRef.Hash == eq.safeHead.L1Origin.Hash {
+			eq.log.Info("hash match")
+
 			eq.resetting = false
 			// if the unsafe head was broken, then restore it to start from the safe head
 			if eq.unsafeHead == (eth.L2BlockRef{}) {
