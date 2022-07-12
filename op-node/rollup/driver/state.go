@@ -108,6 +108,7 @@ func (s *state) Start(ctx context.Context) error {
 
 	s.l2Head, _ = s.l2.L2BlockRefByNumber(ctx, nil)
 	s.log.Info("L2BlockRefByNumber", "l2Head", s.l2Head)
+	s.log.Info("L2BlockRefByNumber", "origin", s.l2Head.L1Origin)
 
 	s.derivation.Reset()
 
