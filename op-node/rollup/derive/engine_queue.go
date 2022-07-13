@@ -262,7 +262,7 @@ func (eq *EngineQueue) forceNextSafeAttributes(ctx context.Context) error {
 // ResetStep Walks the L2 chain backwards until it finds an L2 block whose L1 origin is canonical.
 // The unsafe head is set to the head of the L2 chain, unless the existing safe head is not canonical.
 func (eq *EngineQueue) ResetStep(ctx context.Context, l1Fetcher L1Fetcher) error {
-	eq.log.Info("ResetStep", "eq", eq)
+	// eq.log.Info("ResetStep", "eq", eq)
 	if !eq.resetting {
 		eq.resetting = true
 
