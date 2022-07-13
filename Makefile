@@ -66,7 +66,6 @@ devnet-down:
 devnet-clean:
 	rm -rf ./.devnet
 	cd ./ops-bedrock && docker compose down
-	docker image ls 'ops-bedrock*' --format='{{.Repository}}' | xargs -r docker rmi
 	docker volume ls --filter name=ops-bedrock --format='{{.Name}}' | xargs -r docker volume rm
 .PHONY: devnet-clean
 
