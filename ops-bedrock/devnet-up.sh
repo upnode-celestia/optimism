@@ -29,7 +29,7 @@
 
 set -eu
 
-L1_URL="http://localhost:8545"
+L1_URL="http://localhost:8080"
 L2_URL="http://localhost:9545"
 
 CONTRACTS_BEDROCK=./packages/contracts-bedrock
