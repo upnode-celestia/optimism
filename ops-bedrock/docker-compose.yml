@@ -61,7 +61,7 @@ services:
       --p2p.sequencer.key=/config/p2p-sequencer-key.txt
       --rollup.config=/rollup.json
       --rpc.addr=0.0.0.0
-      --rpc.port=8545
+      --rpc.port=8082
       --p2p.listen.ip=0.0.0.0
       --p2p.listen.tcp=9003
       --p2p.listen.udp=9003
