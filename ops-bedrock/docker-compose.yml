@@ -11,17 +11,17 @@ volumes:
 
 
 services:
-  l1:
-    build:
-      context: .
-      dockerfile: Dockerfile.l1
-    ports:
-      - "8545:8545"
-    volumes:
-      - "l1_data:/db"
-      - ${PWD}/../.devnet/genesis-l1.json:/genesis.json
-    networks:
-      localnet:
+  # l1:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.l1
+  #   ports:
+  #     - "8545:8545"
+  #   volumes:
+  #     - "l1_data:/db"
+  #     - ${PWD}/../.devnet/genesis-l1.json:/genesis.json
+  #   networks:
+  #     localnet:
 
   l2:
     build:
