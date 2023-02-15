@@ -14,8 +14,9 @@ type L1TransactionFetcher interface {
 
 // FrameRef contains data to lookup a frame by its reference
 type FrameRef struct {
-	Number uint64
-	Index  uint64
+	Number  uint64
+	Index   uint64
+	BlockID eth.BlockID
 }
 
 // Frame contains the frame data and it's reference

@@ -7,6 +7,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/log"
 
+	"github.com/ethereum-optimism/optimism/op-node/da"
 	"github.com/ethereum-optimism/optimism/op-node/eth"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 )
@@ -22,7 +23,7 @@ type L1Fetcher interface {
 	L1BlockRefByNumberFetcher
 	L1BlockRefByHashFetcher
 	L1ReceiptsFetcher
-	L1TransactionFetcher
+	da.L1TransactionFetcher
 }
 
 type ResetableStage interface {
@@ -66,11 +67,11 @@ type DerivationPipeline struct {
 }
 
 // NewDerivationPipeline creates a derivation pipeline, which should be reset before use.
-func NewDerivationPipeline(log log.Logger, cfg *rollup.Config, l1Fetcher L1Fetcher, engine Engine, da *rollup.DAConfig, metrics Metrics) *DerivationPipeline {
+func NewDerivationPipeline(log log.Logger, cfg *rollup.Config, l1Fetcher L1Fetcher, engine Engine, metrics Metrics) *DerivationPipeline {
 
 	// Pull stages
 	l1Traversal := NewL1Traversal(log, cfg, l1Fetcher)
-	dataSrc := NewDataSourceFactory(log, cfg, l1Fetcher, da) // auxiliary stage for L1Retrieval
+	dataSrc := NewDataSourceFactory(log, cfg, l1Fetcher) // auxiliary stage for L1Retrieval
 	l1Src := NewL1Retrieval(log, dataSrc, l1Traversal)
 	frameQueue := NewFrameQueue(log, l1Src)
 	bank := NewChannelBank(log, cfg, frameQueue, l1Fetcher)

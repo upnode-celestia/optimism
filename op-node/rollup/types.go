@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ethereum-optimism/optimism/op-node/client"
+	"math/big"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"math/big"
 
 	"github.com/ethereum-optimism/optimism/op-node/eth"
 )
@@ -49,10 +51,25 @@ type Config struct {
 
 	// L1 address that batches are sent to.
 	BatchInboxAddress common.Address `json:"batch_inbox_address"`
+
+	// Address that batches are sent from
+	SenderAddress common.Address
 	// L1 Deposit Contract Address
 	DepositContractAddress common.Address `json:"deposit_contract_address"`
 	// L1 System Config Address
 	L1SystemConfigAddress common.Address `json:"l1_system_config_address"`
+
+	Rpc client.RPC
+
+	ChainID *big.Int
+
+	DaRpc string
+
+	NamespaceId [8]byte
+
+	Fee int64
+
+	GasLimit uint64
 }
 
 // ValidateL1Config checks L1 config variables for errors.
