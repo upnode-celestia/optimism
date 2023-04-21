@@ -2,11 +2,13 @@ package batcher
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	_ "net/http/pprof"
+	"os"
 	"sync"
 	"time"
 
@@ -60,6 +62,8 @@ type BatchSubmitter struct {
 	killCtx           context.Context
 	cancelKillCtx     context.CancelFunc
 
+	daClient *rollup.DAClient
+
 	mutex   sync.Mutex
 	running bool
 
@@ -96,6 +100,16 @@ func (l *BatchSubmitter) StartBatchSubmitting() error {
 
 	l.wg.Add(1)
 	go l.loop()
+
+	daRpc := os.Getenv("OP_BATCHER_DA_RPC")
+	if daRpc == "" {
+		daRpc = "localhost:26650"
+	}
+	daClient, err := rollup.NewDAClient(daRpc)
+	if err != nil {
+		return err
+	}
+	l.daClient = daClient
 
 	l.Log.Info("Batch Submitter started")
 	return nil
@@ -359,6 +373,15 @@ func (l *BatchSubmitter) publishTxToL1(ctx context.Context, queue *txmgr.Queue[t
 func (l *BatchSubmitter) sendTransaction(txdata txData, queue *txmgr.Queue[txData], receiptsCh chan txmgr.TxReceipt[txData]) {
 	// Do the gas estimation offline. A value of 0 will cause the [txmgr] to estimate the gas limit.
 	data := txdata.Bytes()
+
+	ids, _, err := l.daClient.Client.Submit([][]byte{data})
+	if err == nil && len(ids) == 1 {
+		l.Log.Info("celestia: blob successfully submitted", "id", hex.EncodeToString(ids[0]))
+		data = append([]byte{derive.DerivationVersionCelestia}, ids[0]...)
+	} else {
+		l.Log.Info("celestia: blob submission failed; falling back to eth", "err", err)
+	}
+
 	intrinsicGas, err := core.IntrinsicGas(data, nil, false, true, true, false)
 	if err != nil {
 		l.Log.Error("Failed to calculate intrinsic gas", "error", err)
@@ -370,6 +393,7 @@ func (l *BatchSubmitter) sendTransaction(txdata txData, queue *txmgr.Queue[txDat
 		TxData:   data,
 		GasLimit: intrinsicGas,
 	}
+
 	queue.Send(txdata, candidate, receiptsCh)
 }
 
