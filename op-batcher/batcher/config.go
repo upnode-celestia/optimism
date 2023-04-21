@@ -30,6 +30,11 @@ type Config struct {
 	PollInterval           time.Duration
 	MaxPendingTransactions uint64
 
+	// DaRpc is the HTTP provider URL for the Data Availability node.
+	DaRpc string
+
+	// NamespaceId is the id of the namespace of the Data Availability node.
+	NamespaceId string
 	// RollupConfig is queried at startup
 	Rollup *rollup.Config
 
