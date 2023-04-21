@@ -11,6 +11,21 @@ volumes:
 
 
 services:
+  da:
+    image: ghcr.io/rollkit/local-celestia-devnet:v0.12.2
+    ports:
+      - "26650:26650"
+      - "26658:26658"
+      - "26659:26659"
+    environment:
+      CELESTIA_NAMESPACE: 000008e5f679bf7116cb
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:26659/header/1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   l1:
     build:
       context: .
@@ -44,6 +59,7 @@ services:
     depends_on:
       - l1
       - l2
+      - da
     build:
       context: ../
       dockerfile: ./op-node/Dockerfile
@@ -71,6 +87,8 @@ services:
       --metrics.port=7300
       --pprof.enabled
       --rpc.enable-admin
+    environment:
+      OP_NODE_DA_RPC: "da:26650"
     ports:
       - "7545:8545"
       - "9003:9003"
@@ -108,9 +126,14 @@ services:
 
   op-batcher:
     depends_on:
-      - l1
-      - l2
-      - op-node
+      l1:
+        condition: service_started
+      l2:
+        condition: service_started
+      op-node:
+        condition: service_started
+      da:
+        condition: service_healthy
     build:
       context: ../
       dockerfile: ./op-batcher/Dockerfile
@@ -122,6 +145,7 @@ services:
       OP_BATCHER_L1_ETH_RPC: http://l1:8545
       OP_BATCHER_L2_ETH_RPC: http://l2:8545
       OP_BATCHER_ROLLUP_RPC: http://op-node:8545
+      OFFLINE_GAS_ESTIMATION: null
       OP_BATCHER_MAX_CHANNEL_DURATION: 1
       OP_BATCHER_SUB_SAFETY_MARGIN: 4 # SWS is 15, ChannelTimeout is 40
       OP_BATCHER_POLL_INTERVAL: 1s
@@ -131,6 +155,8 @@ services:
       OP_BATCHER_PPROF_ENABLED: "true"
       OP_BATCHER_METRICS_ENABLED: "true"
       OP_BATCHER_RPC_ENABLE_ADMIN: "true"
+      OP_BATCHER_BATCH_TYPE: 0
+      OP_BATCHER_DA_RPC: "da:26650"
 
   artifact-server:
     depends_on:
@@ -143,16 +169,16 @@ services:
     security_opt:
       - "no-new-privileges:true"
 
-  stateviz:
-    build:
-      context: ../
-      dockerfile: ./ops-bedrock/Dockerfile.stateviz
-    command:
-      - stateviz
-      - -addr=0.0.0.0:8080
-      - -snapshot=/op_log/snapshot.log
-      - -refresh=10s
-    ports:
-      - "9090:8080"
-    volumes:
-      - op_log:/op_log:ro
+#  stateviz:
+#    build:
+#      context: ../
+#      dockerfile: ./ops-bedrock/Dockerfile.stateviz
+#    command:
+#      - stateviz
+#      - -addr=0.0.0.0:8080
+#      - -snapshot=/op_log/snapshot.log
+#      - -refresh=10s
+#    ports:
+#      - "9090:8080"
+#    volumes:
+#      - op_log:/op_log:ro

@@ -613,7 +613,8 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 				l.Warn("closed op-node!")
 			}()
 		}
-		node, err := rollupNode.New(context.Background(), &c, l, snapLog, "", metrics.NewMetrics(""))
+
+		node, err := rollupNode.New(context.Background(), &c, cfg.Loggers[name], snapLog, "", metrics.NewMetrics(""))
 		if err != nil {
 			didErrAfterStart = true
 			return nil, err

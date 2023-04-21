@@ -2,15 +2,18 @@ package batcher
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	_ "net/http/pprof"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/ethereum-optimism/optimism/op-batcher/metrics"
+	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
 	"github.com/ethereum-optimism/optimism/op-service/dial"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
@@ -32,6 +35,8 @@ type BatchSubmitter struct {
 	cancelShutdownCtx context.CancelFunc
 	killCtx           context.Context
 	cancelKillCtx     context.CancelFunc
+
+	daClient *rollup.DAClient
 
 	mutex   sync.Mutex
 	running bool
@@ -142,8 +147,17 @@ func (l *BatchSubmitter) Start() error {
 	l.wg.Add(1)
 	go l.loop()
 
-	l.log.Info("Batch Submitter started")
+	daRpc := os.Getenv("OP_BATCHER_DA_RPC")
+	if daRpc == "" {
+		daRpc = "localhost:26650"
+	}
+	daClient, err := rollup.NewDAClient(daRpc)
+	if err != nil {
+		return err
+	}
+	l.daClient = daClient
 
+	l.log.Info("Batch Submitter started")
 	return nil
 }
 
@@ -382,6 +396,15 @@ func (l *BatchSubmitter) publishTxToL1(ctx context.Context, queue *txmgr.Queue[t
 func (l *BatchSubmitter) sendTransaction(txdata txData, queue *txmgr.Queue[txData], receiptsCh chan txmgr.TxReceipt[txData]) {
 	// Do the gas estimation offline. A value of 0 will cause the [txmgr] to estimate the gas limit.
 	data := txdata.Bytes()
+
+	ids, _, err := l.daClient.Client.Submit([][]byte{data})
+	if err == nil && len(ids) == 1 {
+		l.log.Info("celestia: blob successfully submitted", "id", hex.EncodeToString(ids[0]))
+		data = append([]byte{derive.DerivationVersionCelestia}, ids[0]...)
+	} else {
+		l.log.Info("celestia: blob submission failed; falling back to eth", "err", err)
+	}
+
 	intrinsicGas, err := core.IntrinsicGas(data, nil, false, true, true, false)
 	if err != nil {
 		l.log.Error("Failed to calculate intrinsic gas", "error", err)
@@ -393,6 +416,7 @@ func (l *BatchSubmitter) sendTransaction(txdata txData, queue *txmgr.Queue[txDat
 		TxData:   data,
 		GasLimit: intrinsicGas,
 	}
+
 	queue.Send(txdata, candidate, receiptsCh)
 }
 
