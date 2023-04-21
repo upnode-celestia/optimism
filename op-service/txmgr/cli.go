@@ -31,6 +31,9 @@ const (
 	TxSendTimeoutFlagName             = "txmgr.send-timeout"
 	TxNotInMempoolTimeoutFlagName     = "txmgr.not-in-mempool-timeout"
 	ReceiptQueryIntervalFlagName      = "txmgr.receipt-query-interval"
+	DaRpcFlagName                     = "da-rpc"
+	NamespaceIdFlagName               = "namespace-id"
+	AuthTokenFlagName                 = "auth-token"
 )
 
 var (
@@ -145,6 +148,24 @@ func CLIFlagsWithDefaults(envPrefix string, defaults DefaultFlagValues) []cli.Fl
 			Value:   defaults.ReceiptQueryInterval,
 			EnvVars: prefixEnvVars("TXMGR_RECEIPT_QUERY_INTERVAL"),
 		},
+		&cli.StringFlag{
+			Name:    DaRpcFlagName,
+			Usage:   "RPC URL of the DA layer",
+			Value:   "http://da:26659",
+			EnvVars: opservice.PrefixEnvVar(envPrefix, "DA_RPC"),
+		},
+		&cli.StringFlag{
+			Name:    NamespaceIdFlagName,
+			Usage:   "Namespace ID of the DA layer",
+			Value:   "e8e5f679bf7116cb",
+			EnvVars: opservice.PrefixEnvVar(envPrefix, "NAMESPACE_ID"),
+		},
+		&cli.StringFlag{
+			Name:    AuthTokenFlagName,
+			Usage:   "Authentication Token of the DA layer",
+			Value:   "",
+			EnvVars: opservice.PrefixEnvVar(envPrefix, "AUTH_TOKEN"),
+		},
 	}, opsigner.CLIFlags(envPrefix)...)
 }
 
@@ -163,6 +184,9 @@ type CLIConfig struct {
 	NetworkTimeout            time.Duration
 	TxSendTimeout             time.Duration
 	TxNotInMempoolTimeout     time.Duration
+	DaRpc                     string
+	NamespaceId               string
+	AuthToken                 string
 }
 
 func NewCLIConfig(l1RPCURL string, defaults DefaultFlagValues) CLIConfig {
@@ -223,6 +247,9 @@ func ReadCLIConfig(ctx *cli.Context) CLIConfig {
 		NetworkTimeout:            ctx.Duration(NetworkTimeoutFlagName),
 		TxSendTimeout:             ctx.Duration(TxSendTimeoutFlagName),
 		TxNotInMempoolTimeout:     ctx.Duration(TxNotInMempoolTimeoutFlagName),
+		DaRpc:                     ctx.String(DaRpcFlagName),
+		NamespaceId:               ctx.String(NamespaceIdFlagName),
+		AuthToken:                 ctx.String(AuthTokenFlagName),
 	}
 }
 
@@ -310,6 +337,15 @@ type Config struct {
 	// are required to give up on a tx at a particular nonce without receiving
 	// confirmation.
 	SafeAbortNonceTooLowCount uint64
+
+	// DaRpc is the HTTP provider URL for the Data Availability node.
+	DaRpc string
+
+	// NamespaceId is the id of the namespace of the Data Availability node.
+	NamespaceId string
+
+	// AuthToken is the authentication token for the Data Availability node.
+	AuthToken string
 
 	// Signer is used to sign transactions when the gas price is increased.
 	Signer opcrypto.SignerFn

@@ -31,6 +31,10 @@ type Config struct {
 	PollInterval           time.Duration
 	MaxPendingTransactions uint64
 
+	// DA specific
+	DaRpc       string
+	NamespaceId string
+
 	// RollupConfig is queried at startup
 	Rollup *rollup.Config
 
@@ -74,6 +78,12 @@ type CLIConfig struct {
 	// a channel on L1.
 	SubSafetyMargin uint64
 
+	// DaRpc is the HTTP provider URL for the Data Availability node.
+	DaRpc string
+
+	// NamespaceId is the id of the namespace of the Data Availability node.
+	NamespaceId string
+
 	// PollInterval is the delay between querying L2 for more transaction
 	// and creating a new batch.
 	PollInterval time.Duration
@@ -115,11 +125,13 @@ func (c CLIConfig) Check() error {
 func NewConfig(ctx *cli.Context) CLIConfig {
 	return CLIConfig{
 		/* Required Flags */
-		L1EthRpc:        ctx.String(flags.L1EthRpcFlag.Name),
-		L2EthRpc:        ctx.String(flags.L2EthRpcFlag.Name),
-		RollupRpc:       ctx.String(flags.RollupRpcFlag.Name),
-		SubSafetyMargin: ctx.Uint64(flags.SubSafetyMarginFlag.Name),
-		PollInterval:    ctx.Duration(flags.PollIntervalFlag.Name),
+		L1EthRpc:        ctx.GlobalString(flags.L1EthRpcFlag.Name),
+		L2EthRpc:        ctx.GlobalString(flags.L2EthRpcFlag.Name),
+		RollupRpc:       ctx.GlobalString(flags.RollupRpcFlag.Name),
+		DaRpc:           ctx.GlobalString(flags.DaRpcFlag.Name),
+		NamespaceId:     ctx.GlobalString(flags.NamespaceIdFlag.Name),
+		SubSafetyMargin: ctx.GlobalUint64(flags.SubSafetyMarginFlag.Name),
+		PollInterval:    ctx.GlobalDuration(flags.PollIntervalFlag.Name),
 
 		/* Optional Flags */
 		MaxPendingTransactions: ctx.Uint64(flags.MaxPendingTransactionsFlag.Name),
