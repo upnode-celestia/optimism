@@ -245,12 +245,21 @@ def devnet_deploy(paths):
     batch_inbox_address = rollup_config['batch_inbox_address']
     log.info(f'Using batch inbox {batch_inbox_address}')
 
-    log.info('Bringing up `op-node`, `op-proposer` and `op-batcher`.')
-    run_command(['docker', 'compose', 'up', '-d', 'op-node', 'op-proposer', 'op-batcher'], cwd=paths.ops_bedrock_dir, env={
+    log.info('Bringing up DA')
+    run_command(['docker', 'compose', 'up', '-d', 'da'], cwd=paths.ops_bedrock_dir, env={
         'PWD': paths.ops_bedrock_dir,
-        'L2OO_ADDRESS': l2_output_oracle,
-        'SEQUENCER_BATCH_INBOX_ADDRESS': batch_inbox_address
     })
+    wait_up(26650)
+
+    log.info('Bringing up `op-node`, `op-proposer` and `op-batcher`.')
+    run_command(["docker", "compose", "up", "-d", "op-node", "op-proposer", "op-batcher"], cwd=paths.ops_bedrock_dir,
+        env={
+            "PWD": paths.ops_bedrock_dir,
+            "L2OO_ADDRESS": l2_output_oracle,
+            "SEQUENCER_BATCH_INBOX_ADDRESS": batch_inbox_address,
+        },
+    )
+
 
     log.info('Bringing up `artifact-server`')
     run_command(['docker', 'compose', 'up', '-d', 'artifact-server'], cwd=paths.ops_bedrock_dir, env={
@@ -368,10 +377,11 @@ def run_command_preset(command: CommandPreset):
     return proc.returncode
 
 
-def run_command(args, check=True, shell=False, cwd=None, env=None, timeout=None):
+def run_command(args, check=True, shell=False, cwd=None, env=None, timeout=None, capture_output=False):
     env = env if env else {}
     return subprocess.run(
         args,
+        capture_output=capture_output,
         check=check,
         shell=shell,
         env={
