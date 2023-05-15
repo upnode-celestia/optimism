@@ -75,6 +75,7 @@ func newTxMgrConfig(l1Addr string, privKey *ecdsa.PrivateKey) txmgr.CLIConfig {
 		ReceiptQueryInterval:      50 * time.Millisecond,
 		NetworkTimeout:            2 * time.Second,
 		TxNotInMempoolTimeout:     2 * time.Minute,
+		NamespaceId:               "e8e5f679bf7116cb",
 	}
 }
 
@@ -595,6 +596,13 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 		}
 
 		c.Rollup.LogDescription(cfg.Loggers[name], chaincfg.L2ChainIDToNetworkDisplayName)
+
+		daCfg, err := rollup.NewDAConfig("http://127.0.0.1:26659", "e8e5f679bf7116cb")
+		if err != nil {
+			return nil, err
+		}
+
+		c.DAConfig = *daCfg
 
 		node, err := rollupNode.New(context.Background(), &c, cfg.Loggers[name], snapLog, "", metrics.NewMetrics(""))
 		if err != nil {
