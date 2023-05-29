@@ -27,17 +27,3 @@ jobs:
     uses: ./.github/workflows/test.yml
     with:
       GO_VERSION: '1.20'
-
-  # Make a release if this is a manually trigger job, i.e. workflow_dispatch
-  release:
-    needs: [test]
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    permissions: "write-all"
-    steps:
-      - uses: actions/checkout@v3
-      - name: Version Release
-        uses: celestiaorg/.github/.github/actions/version-release@v0.1.1
-        with:
-          github-token: ${{secrets.GITHUB_TOKEN}}
-          version-bump: ${{inputs.version}}
