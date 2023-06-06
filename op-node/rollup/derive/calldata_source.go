@@ -76,17 +76,7 @@ func NewDataSource(ctx context.Context, log log.Logger, cfg *rollup.Config, daCf
 			batcherAddr: batcherAddr,
 		}
 	} else {
-		data, err := DataFromEVMTransactions(cfg, daCfg, batcherAddr, txs, log.New("origin", block))
-		if err != nil {
-			return &DataSource{
-				open:        false,
-				id:          block,
-				cfg:         cfg,
-				fetcher:     fetcher,
-				log:         log,
-				batcherAddr: batcherAddr,
-			}
-		}
+		data := DataFromEVMTransactions(cfg, daCfg, batcherAddr, txs, log.New("origin", block))
 		return &DataSource{
 			open: true,
 			data: data,
@@ -101,10 +91,7 @@ func (ds *DataSource) Next(ctx context.Context) (eth.Data, error) {
 	if !ds.open {
 		if _, txs, err := ds.fetcher.InfoAndTxsByHash(ctx, ds.id.Hash); err == nil {
 			ds.open = true
-			ds.data, err = DataFromEVMTransactions(ds.cfg, ds.daCfg, ds.batcherAddr, txs, log.New("origin", ds.id))
-			if err != nil {
-				return nil, NewTemporaryError(fmt.Errorf("failed to open calldata source: %w", err))
-			}
+			ds.data = DataFromEVMTransactions(ds.cfg, ds.daCfg, ds.batcherAddr, txs, log.New("origin", ds.id))
 		} else if errors.Is(err, ethereum.NotFound) {
 			return nil, NewResetError(fmt.Errorf("failed to open calldata source: %w", err))
 		} else {
@@ -123,7 +110,7 @@ func (ds *DataSource) Next(ctx context.Context) (eth.Data, error) {
 // DataFromEVMTransactions filters all of the transactions and returns the calldata from transactions
 // that are sent to the batch inbox address from the batch sender address.
 // This will return an empty array if no valid transactions are found.
-func DataFromEVMTransactions(config *rollup.Config, daCfg *rollup.DAConfig, batcherAddr common.Address, txs types.Transactions, log log.Logger) ([]eth.Data, error) {
+func DataFromEVMTransactions(config *rollup.Config, daCfg *rollup.DAConfig, batcherAddr common.Address, txs types.Transactions, log log.Logger) []eth.Data {
 	var out []eth.Data
 	l1Signer := config.L1Signer()
 	for j, tx := range txs {
@@ -149,7 +136,7 @@ func DataFromEVMTransactions(config *rollup.Config, daCfg *rollup.DAConfig, batc
 				data, err := daCfg.Client.NamespacedData(context.Background(), daCfg.Namespace, uint64(height))
 				if err != nil {
 					log.Warn("unable to retrieve data from da", "err", err)
-					return nil, err
+					continue
 				}
 				log.Warn("retrieved data", "data", hex.EncodeToString(data[index]))
 				out = append(out, data[index])
@@ -158,7 +145,7 @@ func DataFromEVMTransactions(config *rollup.Config, daCfg *rollup.DAConfig, batc
 			}
 		}
 	}
-	return out, nil
+	return out
 }
 
 // decodeETHData will decode the data retrieved from the EVM, this data
