@@ -16,7 +16,7 @@ services:
     user: root
     platform: "${PLATFORM}"
     image: "ghcr.io/celestiaorg/celestia-node:b222475"
-    command: celestia light start --core.ip consensus-full-robusta-rc4.celestia-robusta.com --gateway --gateway.addr 0.0.0.0 --gateway.port 26659 --gateway.deprecated-endpoints
+    command: celestia light start --core.ip consensus-full-robusta-rc4.celestia-robusta.com --gateway --gateway.addr da --gateway.port 26659 --gateway.deprecated-endpoints
     environment:
       - NODE_TYPE=light
       - CELESTIA_CUSTOM=robusta-rc4:09563A621C5FA1FB6CE61E46C1AEF0E978DCF14EF75E5B9CFF0DC946EA6A2EF0:/dns4/bridge-robusta-rc4.da.celestia-robusta.com/tcp/2121/p2p/12D3KooWBmiv6eLiZqEciK3MULUGB9BrUaYm8aEzxoi2Rh3WGSRV,/dns4/full-robusta-rc4.da.celestia-robusta.com/tcp/2121/p2p/12D3KooWHAKrSyhAKxPDg883MoNXWrZ8goP7BnFihmxvw36nytZH
