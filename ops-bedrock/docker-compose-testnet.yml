@@ -61,6 +61,8 @@ services:
     build:
       context: ../
       dockerfile: ./op-node/Dockerfile
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8545"]
     command: >
       op-node
       --l1=ws://l1:8546
@@ -85,8 +87,9 @@ services:
       --metrics.port=7300
       --pprof.enabled
       --rpc.enable-admin
-      --da-rpc=http://da:26659
-      --namespace-id=000008e5f679bf7116cb
+    environment:
+      OP_NODE_DA_RPC: http://da:26659
+      OP_NODE_NAMESPACE_ID: 000008e5f679bf7116cb
     ports:
       - "7545:8545"
       - "9003:9003"
