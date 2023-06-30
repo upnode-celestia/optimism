@@ -57,7 +57,7 @@ func NewConfig(ctx *cli.Context, log log.Logger) (*node.Config, error) {
 
 	l2SyncEndpoint := NewL2SyncEndpointConfig(ctx)
 
-	daCfg, err := rollup.NewDAConfig(flags.DaRPC.Value, flags.NamespaceId.Value)
+	daCfg, err := rollup.NewDAConfig(ctx.GlobalString(flags.DaRPC.Value), ctx.GlobalString(flags.NamespaceId.Value))
 	if err != nil {
 		return nil, fmt.Errorf("failed to load da config: %w", err)
 	}
