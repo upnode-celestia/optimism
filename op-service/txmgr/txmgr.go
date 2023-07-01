@@ -225,7 +225,7 @@ func (m *SimpleTxManager) send(ctx context.Context, candidate TxCandidate) (*typ
 		}
 		fmt.Printf("res: %v\n", res)
 		if res.Code != 0 {
-			m.l.Warn("unexpected respone code from celestia expected 0; got", "res.Code", res.Code)
+			m.l.Warn("unexpected response code from celestia expected 0; got", "res.Code", res.Code)
 			return nil, errors.New("unexpected response code")
 		}
 
