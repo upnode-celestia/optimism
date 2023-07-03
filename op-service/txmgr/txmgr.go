@@ -224,8 +224,8 @@ func (m *SimpleTxManager) send(ctx context.Context, candidate TxCandidate) (*typ
 			return nil, err
 		}
 		fmt.Printf("res: %v\n", res)
-		if res.Code != 0 || res.TxHash == "" {
-			m.l.Warn("unexpected response from celestia got", "res.Code", res.Code, "res.TxHash", res.TxHash)
+		if res.Code != 0 || res.TxHash == "" || res.Height == 0 {
+			m.l.Warn("unexpected response from celestia got", "res.Code", res.Code, "res.TxHash", res.TxHash, "res.Height", res.Height)
 			return nil, errors.New("unexpected response code")
 		}
 
