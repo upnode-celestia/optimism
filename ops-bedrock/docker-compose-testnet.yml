@@ -91,9 +91,8 @@ services:
       --metrics.port=7300
       --pprof.enabled
       --rpc.enable-admin
-    environment:
-      OP_NODE_DA_RPC: http://da:26659
-      OP_NODE_NAMESPACE_ID: 000008e5f679bf7116cb
+      --da-rpc=http://da:26659
+      --namespace-id=000008e5f679bf7116cb
     ports:
       - "7545:8545"
       - "9003:9003"
