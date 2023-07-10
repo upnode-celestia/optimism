@@ -126,10 +126,14 @@ services:
 
   op-batcher:
     depends_on:
-      - l1
-      - l2
-      - op-node
-      - da
+      l1:
+        condition: service_started
+      l2:
+        condition: service_started
+      op-node:
+        condition: service_started
+      da:
+        condition: service_healthy
     build:
       context: ../
       dockerfile: ./op-batcher/Dockerfile
@@ -137,9 +141,6 @@ services:
       - "6061:6060"
       - "7301:7300"
       - "6545:8545"
-    depends_on:
-      da:
-        condition: service_healthy
     environment:
       OP_BATCHER_L1_ETH_RPC: http://l1:8545
       OP_BATCHER_L2_ETH_RPC: http://l2:8545
