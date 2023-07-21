@@ -597,7 +597,7 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 
 		c.Rollup.LogDescription(cfg.Loggers[name], chaincfg.L2ChainIDToNetworkDisplayName)
 
-		daCfg, err := rollup.NewDAConfig("http://127.0.0.1:26659", "0000e8e5f679bf7116cb")
+		daCfg, err := rollup.NewDAConfig("http://127.0.0.1:26658", "0000e8e5f679bf7116cb", "")
 		if err != nil {
 			return nil, err
 		}
