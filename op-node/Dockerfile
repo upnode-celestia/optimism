@@ -13,6 +13,7 @@ RUN go mod download
 
 # build op-node with the shared go.mod & go.sum files
 COPY ./op-node /app/op-node
+COPY ./op-celestia /app/op-celestia
 COPY ./op-chain-ops /app/op-chain-ops
 COPY ./op-service /app/op-service
 COPY ./op-bindings /app/op-bindings
