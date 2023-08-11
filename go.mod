@@ -31,7 +31,7 @@ require (
 	github.com/rollkit/celestia-openrpc v0.1.2
 	github.com/schollz/progressbar/v3 v3.13.0
 	github.com/stretchr/testify v1.8.4
-	github.com/urfave/cli v1.22.9
+	github.com/urfave/cli v1.22.14
 	github.com/urfave/cli/v2 v2.17.2-0.20221006022127-8f469abc00aa
 	golang.org/x/crypto v0.10.0
 	golang.org/x/exp v0.0.0-20230321023759-10a507213a29
