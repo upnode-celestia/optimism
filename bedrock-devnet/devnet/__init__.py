@@ -233,15 +233,23 @@ def devnet_deploy(paths):
     log.info(f'Using batch inbox {batch_inbox_address}')
 
     log.info('Bringing up DA')
-    run_command(['docker-compose', 'up', '-d', 'da'], cwd=ops_bedrock_dir, env={
-      'PWD': ops_bedrock_dir,
+    run_command(['docker', 'compose', 'up', '-d', 'da'], cwd=paths.ops_bedrock_dir, env={
+        'PWD': paths.ops_bedrock_dir,
     })
     log.info('Bringing up everything else.')
-    run_command(['docker', 'compose', 'up', '-d', 'op-node', 'op-proposer', 'op-batcher'], cwd=paths.ops_bedrock_dir, env={
-        'PWD': paths.ops_bedrock_dir,
-        'L2OO_ADDRESS': l2_output_oracle,
-        'SEQUENCER_BATCH_INBOX_ADDRESS': batch_inbox_address
-    })
+    result = run_command(["docker", "exec", "ops-bedrock-da-1", "celestia", "bridge", "auth", "admin", "--node.store", "/home/celestia/bridge"],
+        cwd=paths.ops_bedrock_dir, capture_output=True,
+    )
+    auth_token = result.stdout
+    run_command(["docker", "compose", "up", "-d", "op-node", "op-proposer", "op-batcher"], cwd=paths.ops_bedrock_dir,
+        env={
+            "PWD": paths.ops_bedrock_dir,
+            "L2OO_ADDRESS": l2_output_oracle,
+            "SEQUENCER_BATCH_INBOX_ADDRESS": batch_inbox_address,
+            "CELESTIA_NODE_AUTH_TOKEN": auth_token,
+        },
+    )
+
 
     log.info('Devnet ready.')
 
@@ -308,10 +316,11 @@ def devnet_test(paths):
          timeout=8*60,
     )
 
-def run_command(args, check=True, shell=False, cwd=None, env=None, timeout=None):
+def run_command(args, check=True, shell=False, cwd=None, env=None, timeout=None, capture_output=False):
     env = env if env else {}
     return subprocess.run(
         args,
+        capture_output=capture_output,
         check=check,
         shell=shell,
         env={
