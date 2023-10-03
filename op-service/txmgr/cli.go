@@ -151,7 +151,7 @@ func CLIFlagsWithDefaults(envPrefix string, defaults DefaultFlagValues) []cli.Fl
 		&cli.StringFlag{
 			Name:    DaRpcFlagName,
 			Usage:   "RPC URL of the DA layer",
-			Value:   "http://da:26659",
+			Value:   "http://da:26658",
 			EnvVars: opservice.PrefixEnvVar(envPrefix, "DA_RPC"),
 		},
 		&cli.StringFlag{
@@ -225,6 +225,15 @@ func (m CLIConfig) Check() error {
 	if m.SafeAbortNonceTooLowCount == 0 {
 		return errors.New("SafeAbortNonceTooLowCount must not be 0")
 	}
+	if m.DaRpc == "" {
+		return errors.New("must provide a DA RPC url")
+	}
+	if m.NamespaceId == "" {
+		return errors.New("must provide a DA namespace ID")
+	}
+	if m.AuthToken == "" {
+		return errors.New("must provide a DA auth token")
+	}
 	if err := m.SignerCLIConfig.Check(); err != nil {
 		return err
 	}
@@ -295,6 +304,9 @@ func NewConfig(cfg CLIConfig, l log.Logger) (Config, error) {
 		ReceiptQueryInterval:      cfg.ReceiptQueryInterval,
 		NumConfirmations:          cfg.NumConfirmations,
 		SafeAbortNonceTooLowCount: cfg.SafeAbortNonceTooLowCount,
+		DaRpc:                     cfg.DaRpc,
+		NamespaceId:               cfg.NamespaceId,
+		AuthToken:                 cfg.AuthToken,
 		Signer:                    signerFactory(chainID),
 		From:                      from,
 	}, nil
