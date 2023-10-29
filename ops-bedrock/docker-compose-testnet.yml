@@ -11,6 +11,7 @@ volumes:
 
 
 services:
+
 #  da:
 #    container_name: celestia-light-node
 #    user: root
@@ -25,6 +26,7 @@ services:
 #    ports:
 #      - "26657:26657"
 #      - "26659:26659"
+
 
   l1:
     build:
@@ -93,7 +95,9 @@ services:
       --rpc.enable-admin
       --da-rpc=http://host.docker.internal:26658
       --namespace-id=00000aae0236e90166d3
-      --auth-token="${CELESTIA_NODE_AUTH_TOKEN}"
+      --auth-token=$CELESTIA_NODE_AUTH_TOKEN
+    environment:
+      OP_NODE_AUTH_TOKEN: $CELESTIA_NODE_AUTH_TOKEN
     ports:
       - "7545:8545"
       - "9003:9003"
