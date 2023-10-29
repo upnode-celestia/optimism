@@ -234,7 +234,7 @@ func (m *SimpleTxManager) send(ctx context.Context, candidate TxCandidate) (*typ
 			m.l.Warn("unable to wait for celestia header sync", "err", err)
 			return nil, err
 		}
-		height, err := m.daClient.Blob.Submit(ctx, []*blob.Blob{dataBlob})
+		height, err := m.daClient.Blob.Submit(ctx, []*blob.Blob{dataBlob}, openrpc.DefaultSubmitOptions())
 		if err != nil {
 			m.l.Warn("unable to publish tx to celestia", "err", err)
 			return nil, err
@@ -245,7 +245,7 @@ func (m *SimpleTxManager) send(ctx context.Context, candidate TxCandidate) (*typ
 			return nil, errors.New("unexpected response code")
 		}
 		frameRef := celestia.FrameRef{
-			BlockHeight: height,
+			BlockHeight:  height,
 			TxCommitment: com,
 		}
 		frameRefData, _ := frameRef.MarshalBinary()
