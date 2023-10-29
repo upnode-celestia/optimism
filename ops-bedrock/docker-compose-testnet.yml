@@ -11,20 +11,20 @@ volumes:
 
 
 services:
-  da:
-    container_name: celestia-light-node
-    user: root
-    platform: "${PLATFORM}"
-    image: "ghcr.io/celestiaorg/celestia-node:v0.11.0-rc8"
-    command: celestia light start --core.ip consensus-full-arabica-9.celestia-arabica.com --p2p.network arabica --log.level debug
-    environment:
-      - NODE_TYPE=light
-      - P2P_NETWORK=arabica
-    volumes:
-      - $HOME/.celestia-light-arabica-9/:/home/celestia/.celestia-light-arabica-9/
-    ports:
-      - "26657:26657"
-      - "26659:26659"
+#  da:
+#    container_name: celestia-light-node
+#    user: root
+#    platform: "${PLATFORM}"
+#    image: "ghcr.io/celestiaorg/celestia-node:v0.11.0-rc8"
+#    command: celestia light start --core.ip consensus-full-arabica-9.celestia-arabica.com --p2p.network arabica --log.level debug
+#    environment:
+#      - NODE_TYPE=light
+#      - P2P_NETWORK=arabica
+#    volumes:
+#      - $HOME/.celestia-light-arabica-9/:/home/celestia/.celestia-light-arabica-9/
+#    ports:
+#      - "26657:26657"
+#      - "26659:26659"
 
   l1:
     build:
@@ -91,13 +91,16 @@ services:
       --metrics.port=7300
       --pprof.enabled
       --rpc.enable-admin
-      --da-rpc=http://da:26659
+      --da-rpc=http://host.docker.internal:26658
       --namespace-id=00000aae0236e90166d3
+      --auth-token="${CELESTIA_NODE_AUTH_TOKEN}"
     ports:
       - "7545:8545"
       - "9003:9003"
       - "7300:7300"
       - "6060:6060"
+    extra_hosts:
+      - host.docker.internal:host-gateway
     volumes:
       - "${PWD}/p2p-sequencer-key.txt:/config/p2p-sequencer-key.txt"
       - "${PWD}/p2p-node-key.txt:/config/p2p-node-key.txt"
@@ -116,6 +119,8 @@ services:
     ports:
       - "6062:6060"
       - "7302:7300"
+    extra_hosts:
+      - host.docker.internal:host-gateway
     environment:
       OP_PROPOSER_L1_ETH_RPC: http://l1:8545
       OP_PROPOSER_ROLLUP_RPC: http://op-node:8545
@@ -130,7 +135,7 @@ services:
       OP_PROPOSER_METRICS_ENABLED: "true"
       OP_PROPOSER_ALLOW_NON_FINALIZED: "false"
       OP_PROPOSER_NAMESPACE_ID: "00000aae0236e90166d3"
-      OP_PROPOSER_DA_RPC: http://da:26659
+      OP_PROPOSER_DA_RPC: http://host.docker.internal:26658
       OP_PROPOSER_NETWORK_TIMEOUT: 180s
 
   op-batcher:
@@ -138,7 +143,7 @@ services:
       - l1
       - l2
       - op-node
-      - da
+#      - da
     build:
       context: ../
       dockerfile: ./op-batcher/Dockerfile
@@ -146,8 +151,10 @@ services:
       - "6061:6060"
       - "7301:7300"
       - "6545:8545"
+    extra_hosts:
+      - host.docker.internal:host-gateway
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://da:26659/header/1"]
+      test: ["CMD", "wget", "-q", "-O", "-", "http://host.docker.internal:26658/header/1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -173,7 +180,8 @@ services:
       OP_BATCHER_METRICS_ENABLED: "true"
       OP_BATCHER_RPC_ENABLE_ADMIN: "true"
       OP_BATCHER_NAMESPACE_ID: "00000aae0236e90166d3"
-      OP_BATCHER_DA_RPC: http://da:26659
+      OP_BATCHER_DA_RPC: http://host.docker.internal:26658
+      OP_BATCHER_AUTH_TOKEN: $CELESTIA_NODE_AUTH_TOKEN
 
   stateviz:
     build:
