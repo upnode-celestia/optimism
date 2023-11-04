@@ -16,6 +16,7 @@ COPY ./op-node /app/op-node
 COPY ./op-chain-ops /app/op-chain-ops
 COPY ./op-service /app/op-service
 COPY ./op-bindings /app/op-bindings
+COPY ./op-celestia /app/op-celestia
 COPY ./.git /app/.git
 
 WORKDIR /app/op-node

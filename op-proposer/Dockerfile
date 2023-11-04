@@ -14,6 +14,7 @@ RUN go mod download
 # build op-proposer with the shared go.mod & go.sum files
 COPY ./op-proposer /app/op-proposer
 COPY ./op-bindings /app/op-bindings
+COPY ./op-celestia /app/op-celestia
 COPY ./op-node /app/op-node
 COPY ./op-service /app/op-service
 COPY ./.git /app/.git

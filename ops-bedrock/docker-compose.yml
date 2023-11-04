@@ -11,15 +11,6 @@ volumes:
 
 
 services:
-  op_stack_go_builder:  # Not an actual service, but builds the prerequisite go images
-    build:
-      context: ../
-      dockerfile: ops/docker/op-stack-go/Dockerfile
-      args:
-        GIT_COMMIT: "dev"
-        GIT_DATE: "0"
-    image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-stack-go:devnet
-    entrypoint: ["echo", "build complete"]
   da:
     platform: linux/x86_64
     image: "ghcr.io/rollkit/local-celestia-devnet:v0.11.0"
@@ -140,8 +131,6 @@ services:
 
   op-batcher:
     depends_on:
-      op_stack_go_builder:
-        condition: service_started
       l1:
         condition: service_started
       l2:
