@@ -223,6 +223,24 @@ func (s *Driver) eventLoop() {
 		sequencerTimer.Reset(delay)
 	}
 
+	sequencerStep := func() error {
+		payload, err := s.sequencer.RunNextSequencerAction(ctx)
+		if err != nil {
+			s.log.Error("Sequencer critical error", "err", err)
+			return err
+		}
+		if s.network != nil && payload != nil {
+			// Publishing of unsafe data via p2p is optional.
+			// Errors are not severe enough to change/halt sequencing but should be logged and metered.
+			if err := s.network.PublishL2Payload(ctx, payload); err != nil {
+				s.log.Warn("failed to publish newly created block", "id", payload.ID(), "err", err)
+				s.metrics.RecordPublishingError()
+			}
+		}
+		planSequencerAction() // schedule the next sequencer action to keep the sequencing looping
+		return nil
+	}
+
 	// Create a ticker to check if there is a gap in the engine queue. Whenever
 	// there is, we send requests to sync source to retrieve the missing payloads.
 	syncCheckInterval := time.Duration(s.config.BlockTime) * time.Second * 2
@@ -252,7 +270,17 @@ func (s *Driver) eventLoop() {
 				// This may adjust at any time based on fork-choice changes or previous errors.
 				//
 				// update sequencer time if the head changed
-				planSequencerAction()
+				delay := s.sequencer.PlanNextSequencerAction()
+				if delay == 0 {
+					// immediately do sequencerStep if time is ready
+					if err := sequencerStep(); err != nil {
+						return
+					}
+					// sequencerStep was already done, so we continue to next round
+					continue
+				} else {
+					planSequencerAction()
+				}
 			}
 		} else {
 			sequencerCh = nil
@@ -265,22 +293,28 @@ func (s *Driver) eventLoop() {
 			altSyncTicker.Reset(syncCheckInterval)
 		}
 
+		if true { //s.driverConfig.SequencerPriority {
+			// help sequencerStep not interrupt by other steps
+			select {
+			case <-sequencerCh:
+				if err := sequencerStep(); err != nil {
+					return
+				}
+				continue
+			case newL1Head := <-s.l1HeadSig: // sequencerStep may depend on this when FindL1Origin
+				s.l1State.HandleNewL1HeadBlock(newL1Head)
+				reqStep() // a new L1 head may mean we have the data to not get an EOF again.
+				continue
+			default:
+			}
+		}
+
 		select {
 		case <-sequencerCh:
-			payload, err := s.sequencer.RunNextSequencerAction(ctx)
-			if err != nil {
-				s.log.Error("Sequencer critical error", "err", err)
+			if err := sequencerStep(); err != nil {
 				return
 			}
-			if s.network != nil && payload != nil {
-				// Publishing of unsafe data via p2p is optional.
-				// Errors are not severe enough to change/halt sequencing but should be logged and metered.
-				if err := s.network.PublishL2Payload(ctx, payload); err != nil {
-					s.log.Warn("failed to publish newly created block", "id", payload.ID(), "err", err)
-					s.metrics.RecordPublishingError()
-				}
-			}
-			planSequencerAction() // schedule the next sequencer action to keep the sequencing looping
+			continue
 		case <-altSyncTicker.C:
 			// Check if there is a gap in the current unsafe payload queue.
 			ctx, cancel := context.WithTimeout(ctx, time.Second*2)
