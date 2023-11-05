@@ -221,7 +221,7 @@ func (m *SimpleTxManager) send(ctx context.Context, candidate TxCandidate) (*typ
 	// writes to a smart contract, we overwrite _only_ batcher candidate as the
 	// frame pointer to celestia, while retaining the proposer pathway that
 	// writes the state commitment data to ethereum.
-	if candidate.To.Hex() == "0xff00000000000000000000000000000000000000" {
+	if candidate.To.Hex() == "0xfF00000000000000000000000000000000000000" {
 		dataBlob, err := blob.NewBlobV0(m.namespace.Bytes(), candidate.TxData)
 		com, err := blob.CreateCommitment(dataBlob)
 		if err != nil {
