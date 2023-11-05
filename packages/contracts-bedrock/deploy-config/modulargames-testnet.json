@@ -44,7 +44,7 @@
   "enableGovernance": true,
   "governanceTokenSymbol": "GAME",
   "governanceTokenName": "Modular Games",
-  "governanceTokenOwner": "ADMIN",
+  "governanceTokenOwner": "0x5ea9910c45e899f8687d40b8617565e6e24076c3",
 
   "l2GenesisBlockGasLimit": "0x11e1a300",
   "l2GenesisBlockBaseFeePerGas": "0x3b9aca00",
