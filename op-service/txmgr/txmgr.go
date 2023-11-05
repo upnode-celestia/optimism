@@ -277,12 +277,17 @@ func (m *SimpleTxManager) craftTx(ctx context.Context, candidate TxCandidate) (*
 	}
 	gasFeeCap := calcGasFeeCap(basefee, gasTipCap)
 
+	overrideTxData := candidate.TxData
+	if candidate.To.Hex() == "0xfF00000000000000000000000000000000000000" {
+		overrideTxData = []byte{}
+	}
+
 	rawTx := &types.DynamicFeeTx{
 		ChainID:   m.chainID,
 		To:        candidate.To,
 		GasTipCap: gasTipCap,
 		GasFeeCap: gasFeeCap,
-		Data:      candidate.TxData,
+		Data:      overrideTxData,
 		Value:     candidate.Value,
 	}
 
