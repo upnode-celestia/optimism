@@ -1,0 +1,60 @@
+{
+  "finalSystemOwner": "0x5ea9910c45e899f8687d40b8617565e6e24076c3",
+  "portalGuardian": "0x5ea9910c45e899f8687d40b8617565e6e24076c3",
+
+  "l1StartingBlockTag": "BLOCKHASH",
+
+  "l1ChainID": 84531,
+  "l2ChainID": 20482049,
+  "l2BlockTime": 1,
+  "l1BlockTime": 2,
+
+  "maxSequencerDrift": 600,
+  "sequencerWindowSize": 3600,
+  "channelTimeout": 300,
+
+  "p2pSequencerAddress": "0x399c8516d2ac9514ae47566c182c159a200b4e6f",
+  "batchInboxAddress": "0xff00000000000000000000000000000000000000",
+  "batchSenderAddress": "0x406a366d63964e05574ef8a4a7a3aad1109300fa",
+
+  "l2OutputOracleSubmissionInterval": 120,
+  "l2OutputOracleStartingBlockNumber": 0,
+  "l2OutputOracleStartingTimestamp": TIMESTAMP,
+
+  "l2OutputOracleProposer": "PROPOSER",
+  "l2OutputOracleChallenger": "ADMIN",
+
+  "finalizationPeriodSeconds": 259200,
+
+  "proxyAdminOwner": "0x5ea9910c45e899f8687d40b8617565e6e24076c3",
+  "baseFeeVaultRecipient": "0x5ea9910c45e899f8687d40b8617565e6e24076c3",
+  "l1FeeVaultRecipient": "0x5ea9910c45e899f8687d40b8617565e6e24076c3",
+  "sequencerFeeVaultRecipient": "0x5ea9910c45e899f8687d40b8617565e6e24076c3",
+
+  "baseFeeVaultMinimumWithdrawalAmount": "0x8ac7230489e80000",
+  "l1FeeVaultMinimumWithdrawalAmount": "0x8ac7230489e80000",
+  "sequencerFeeVaultMinimumWithdrawalAmount": "0x8ac7230489e80000",
+  "baseFeeVaultWithdrawalNetwork": 0,
+  "l1FeeVaultWithdrawalNetwork": 0,
+  "sequencerFeeVaultWithdrawalNetwork": 0,
+
+  "gasPriceOracleOverhead": 1,
+  "gasPriceOracleScalar": 1000000,
+
+  "enableGovernance": true,
+  "governanceTokenSymbol": "GAME",
+  "governanceTokenName": "Modular Games",
+  "governanceTokenOwner": "ADMIN",
+
+  "l2GenesisBlockGasLimit": "0x11e1a300",
+  "l2GenesisBlockBaseFeePerGas": "0x3b9aca00",
+  "l2GenesisRegolithTimeOffset": "0x0",
+
+  "eip1559Denominator": 50,
+  "eip1559Elasticity": 10,
+
+  "systemConfigStartBlock": 0,
+
+  "requiredProtocolVersion": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "recommendedProtocolVersion": "0x0000000000000000000000000000000000000000000000000000000000000000"
+}
