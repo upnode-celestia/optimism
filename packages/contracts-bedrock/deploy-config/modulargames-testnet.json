@@ -2,7 +2,7 @@
   "finalSystemOwner": "0x5ea9910c45e899f8687d40b8617565e6e24076c3",
   "portalGuardian": "0x5ea9910c45e899f8687d40b8617565e6e24076c3",
 
-  "l1StartingBlockTag": "BLOCKHASH",
+  "l1StartingBlockTag": "0x6d6bf8e589137e22976a655f2289451c2107ecd05850644b5fbb9ff2b9f82691",
 
   "l1ChainID": 84531,
   "l2ChainID": 20482049,
@@ -19,10 +19,10 @@
 
   "l2OutputOracleSubmissionInterval": 120,
   "l2OutputOracleStartingBlockNumber": 0,
-  "l2OutputOracleStartingTimestamp": TIMESTAMP,
+  "l2OutputOracleStartingTimestamp": 1699180466,
 
-  "l2OutputOracleProposer": "PROPOSER",
-  "l2OutputOracleChallenger": "ADMIN",
+  "l2OutputOracleProposer": "0xf87964c1e8c1472ff2887b6e02089a327f66e29b",
+  "l2OutputOracleChallenger": "0x5ea9910c45e899f8687d40b8617565e6e24076c3",
 
   "finalizationPeriodSeconds": 259200,
 
