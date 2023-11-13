@@ -293,7 +293,7 @@ func (s *Driver) eventLoop() {
 			altSyncTicker.Reset(syncCheckInterval)
 		}
 
-		if true { //s.driverConfig.SequencerPriority {
+		if false { //s.driverConfig.SequencerPriority {
 			// help sequencerStep not interrupt by other steps
 			select {
 			case <-sequencerCh:
