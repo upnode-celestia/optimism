@@ -247,6 +247,7 @@ func (l *L2OutputSubmitter) FetchNextOutputInfo(ctx context.Context) (*eth.Outpu
 		Context: cCtx,
 	}
 	nextCheckpointBlock, err := l.l2ooContract.NextBlockNumber(callOpts)
+	fmt.Println("Next Checkpoint Block", nextCheckpointBlock)
 	if err != nil {
 		l.log.Error("proposer unable to get next block number", "err", err)
 		return nil, false, err
