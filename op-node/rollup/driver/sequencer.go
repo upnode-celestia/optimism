@@ -96,7 +96,10 @@ func (d *Sequencer) StartBuildingBlock(ctx context.Context) error {
 		"origin", l1Origin, "origin_time", l1Origin.Time, "noTxPool", attrs.NoTxPool)
 
 	// Start a payload building process.
-	errTyp, err := d.engine.StartPayload(ctx, l2Head, attrs, false)
+	// errTyp, err := d.engine.StartPayload(ctx, l2Head, attrs, false)
+
+	// Dirty fix: always safe
+	errTyp, err := d.engine.StartPayload(ctx, l2Head, attrs, true)
 	if err != nil {
 		return fmt.Errorf("failed to start building on top of L2 chain %s, error (%d): %w", l2Head, errTyp, err)
 	}
