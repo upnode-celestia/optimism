@@ -273,11 +273,15 @@ func (eq *EngineQueue) Step(ctx context.Context) error {
 	if err := eq.tryFinalizePastL2Blocks(ctx); err != nil {
 		return err
 	}
+	fmt.Println("Run to here")
 	if next, err := eq.prev.NextAttributes(ctx, eq.safeHead); err == io.EOF {
+		fmt.Println("A")
 		outOfData = true
 	} else if err != nil {
+		fmt.Println("B")
 		return err
 	} else {
+		fmt.Println("C")
 		eq.safeAttributes = &attributesWithParent{
 			attributes: next,
 			parent:     eq.safeHead,
