@@ -264,7 +264,7 @@ func (l *L2OutputSubmitter) FetchNextOutputInfo(ctx context.Context) (*eth.Outpu
 	// Use either the finalized or safe head depending on the config. Finalized head is default & safer.
 	var currentBlockNumber *big.Int
 	if l.allowNonFinalized {
-		currentBlockNumber = new(big.Int).SetUint64(status.SafeL2.Number)
+		currentBlockNumber = new(big.Int).SetUint64(status.UnsafeL2.Number)
 	} else {
 		currentBlockNumber = new(big.Int).SetUint64(status.FinalizedL2.Number)
 	}
