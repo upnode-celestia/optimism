@@ -281,6 +281,7 @@ func (l *L2OutputSubmitter) fetchOutput(ctx context.Context, block *big.Int) (*e
 	ctx, cancel := context.WithTimeout(ctx, l.networkTimeout)
 	defer cancel()
 	output, err := l.rollupClient.OutputAtBlock(ctx, block.Uint64())
+	fmt.Println("Output", output)
 	if err != nil {
 		l.log.Error("failed to fetch output at block %d: %w", block, err)
 		return nil, false, err
