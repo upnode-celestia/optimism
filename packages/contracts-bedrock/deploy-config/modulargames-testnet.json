@@ -2,11 +2,11 @@
   "finalSystemOwner": "0x5ea9910c45e899f8687d40b8617565e6e24076c3",
   "portalGuardian": "0x5ea9910c45e899f8687d40b8617565e6e24076c3",
 
-  "l1StartingBlockTag": "0x2bf60a59c301be14a44dcbf9ceb98e989cdd944db02030837c0dcd78d2fc7feb",
+  "l1StartingBlockTag": "0x9de7a9673cde5026133c281e4357e6966f32fc68cb6a38e6eaa40eed955a1f5a",
 
   "l1ChainID": 84531,
   "l2ChainID": 20482049,
-  "l2BlockTime": 1,
+  "l2BlockTime": 2,
   "l1BlockTime": 2,
 
   "maxSequencerDrift": 600,
@@ -19,12 +19,12 @@
 
   "l2OutputOracleSubmissionInterval": 120,
   "l2OutputOracleStartingBlockNumber": 0,
-  "l2OutputOracleStartingTimestamp": 1699192312,
+  "l2OutputOracleStartingTimestamp": 1699896242,
 
   "l2OutputOracleProposer": "0xf87964c1e8c1472ff2887b6e02089a327f66e29b",
   "l2OutputOracleChallenger": "0x5ea9910c45e899f8687d40b8617565e6e24076c3",
 
-  "finalizationPeriodSeconds": 259200,
+  "finalizationPeriodSeconds": 12,
 
   "proxyAdminOwner": "0x5ea9910c45e899f8687d40b8617565e6e24076c3",
   "baseFeeVaultRecipient": "0x5ea9910c45e899f8687d40b8617565e6e24076c3",
