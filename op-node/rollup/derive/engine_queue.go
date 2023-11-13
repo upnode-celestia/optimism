@@ -206,6 +206,7 @@ func (eq *EngineQueue) Finalize(l1Origin eth.L1BlockRef) {
 	// and tryFinalizeL1Origin() will eventually detect that we are on the wrong chain,
 	// if not resetting due to reorg elsewhere already.
 	for _, fd := range eq.finalityData {
+		fmt.Println("finalize", fd.L1Block, l1Origin.ID())
 		if fd.L1Block == l1Origin.ID() {
 			eq.tryFinalizeL2()
 			return
