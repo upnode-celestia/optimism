@@ -80,7 +80,7 @@ const maxUnsafePayloadsMemory = 500 * 1024 * 1024
 // and new finalization events happen at most 4 epochs behind the head.
 // And then we add 1 to make pruning easier by leaving room for a new item without pruning the 32*4.
 // const finalityLookback = 4*32 + 1
-const finalityLookback = 64*32 + 1 // For base
+const finalityLookback = 32*32 + 1 // For base
 
 // finalityDelay is the number of L1 blocks to traverse before trying to finalize L2 blocks again.
 // We do not want to do this too often, since it requires fetching a L1 block by number, so no cache data.
@@ -275,15 +275,12 @@ func (eq *EngineQueue) Step(ctx context.Context) error {
 	if err := eq.tryFinalizePastL2Blocks(ctx); err != nil {
 		return err
 	}
-	fmt.Println("Run to here")
+
 	if next, err := eq.prev.NextAttributes(ctx, eq.safeHead); err == io.EOF {
-		fmt.Println("A")
 		outOfData = true
 	} else if err != nil {
-		fmt.Println("B")
 		return err
 	} else {
-		fmt.Println("C")
 		eq.safeAttributes = &attributesWithParent{
 			attributes: next,
 			parent:     eq.safeHead,
@@ -376,9 +373,14 @@ func (eq *EngineQueue) tryFinalizeL2() {
 	// go through the latest inclusion data, and find the last L2 block that was derived from a finalized L1 block
 	for _, fd := range eq.finalityData {
 		if fd.L2Block.Number > finalizedL2.Number && fd.L1Block.Number <= eq.finalizedL1.Number {
+			fmt.Println("Finalized")
 			finalizedL2 = fd.L2Block
 			eq.needForkchoiceUpdate = true
 		}
+	}
+	// Also move safe head if finalizedL2 head is greater
+	if finalizedL2.Number > eq.safeHead.Number {
+		eq.safeHead = finalizedL2
 	}
 	eq.finalized = finalizedL2
 	eq.metrics.RecordL2Ref("l2_finalized", finalizedL2)
@@ -395,7 +397,7 @@ func (eq *EngineQueue) postProcessSafeL2() {
 	if len(eq.finalityData) == 0 || eq.finalityData[len(eq.finalityData)-1].L1Block.Number < eq.origin.Number {
 		// append entry for new L1 block
 		eq.finalityData = append(eq.finalityData, FinalityData{
-			L2Block: eq.safeHead,
+			L2Block: eq.unsafeHead,
 			L1Block: eq.origin.ID(),
 		})
 		last := &eq.finalityData[len(eq.finalityData)-1]
