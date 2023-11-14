@@ -3,6 +3,8 @@ package driver
 import (
 	"context"
 
+	"github.com/ethereum/go-ethereum"
+
 	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 )
@@ -30,17 +32,14 @@ func (c *confDepth) L1BlockRefByNumber(ctx context.Context, num uint64) (eth.L1B
 	// and instantly return the origin by number from the buffer if we can.
 
 	// Don't apply the conf depth is l1Head is empty (as it is during the startup case before the l1State is initialized).
-	// l1Head := c.l1Head()
-	// if l1Head == (eth.L1BlockRef{}) {
-	// 	return c.L1Fetcher.L1BlockRefByNumber(ctx, num)
-	// }
-	// if num == 0 || c.depth == 0 || num+c.depth <= l1Head.Number {
-	// 	return c.L1Fetcher.L1BlockRefByNumber(ctx, num)
-	// }
-	// return eth.L1BlockRef{}, ethereum.NotFound
-
-	// Bypass for L3 compatibility
-	return c.L1Fetcher.L1BlockRefByNumber(ctx, num)
+	l1Head := c.l1Head()
+	if l1Head == (eth.L1BlockRef{}) {
+		return c.L1Fetcher.L1BlockRefByNumber(ctx, num)
+	}
+	if num == 0 || c.depth == 0 || num+c.depth <= l1Head.Number {
+		return c.L1Fetcher.L1BlockRefByNumber(ctx, num)
+	}
+	return eth.L1BlockRef{}, ethereum.NotFound
 }
 
 var _ derive.L1Fetcher = (*confDepth)(nil)
