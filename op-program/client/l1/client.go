@@ -48,7 +48,6 @@ func (o *OracleL1Client) L1BlockRefByLabel(ctx context.Context, label eth.BlockL
 
 func (o *OracleL1Client) L1BlockRefByNumber(ctx context.Context, number uint64) (eth.L1BlockRef, error) {
 	if number > o.head.Number {
-		fmt.Println("Error here")
 		return eth.L1BlockRef{}, fmt.Errorf("%w: block number %d", ErrNotFound, number)
 	}
 	hash, ok := o.hashByNum[number]
