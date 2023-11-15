@@ -276,7 +276,7 @@ func AvailableReceiptsFetchingMethods(kind RPCProviderKind) ReceiptsFetchingMeth
 	case RPCKindAlchemy:
 		return AlchemyGetTransactionReceipts | EthGetBlockReceipts | EthGetTransactionReceiptBatch
 	case RPCKindQuickNode:
-		return EthGetBlockReceipts | EthGetTransactionReceiptBatch
+		return DebugGetRawReceipts | EthGetBlockReceipts | EthGetTransactionReceiptBatch
 	case RPCKindInfura:
 		// Infura is big, but sadly does not support more optimized receipts fetching methods (yet?)
 		return EthGetTransactionReceiptBatch
