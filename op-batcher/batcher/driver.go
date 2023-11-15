@@ -2,6 +2,7 @@ package batcher
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ethereum-optimism/optimism/op-batcher/metrics"
+	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
 	"github.com/ethereum-optimism/optimism/op-service/dial"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
@@ -18,7 +20,25 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
+
+	"github.com/ethereum-optimism/optimism/op-celestia/celestia"
+	openrpc "github.com/rollkit/celestia-openrpc"
+	"github.com/rollkit/celestia-openrpc/types/blob"
 )
+
+var ErrBatcherNotRunning = errors.New("batcher is not running")
+
+type L1Client interface {
+	HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
+}
+
+type L2Client interface {
+	BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error)
+}
+
+type RollupClient interface {
+	SyncStatus(ctx context.Context) (*eth.SyncStatus, error)
+}
 
 // BatchSubmitter encapsulates a service responsible for submitting L2 tx
 // batches to L1 for availability.
@@ -32,6 +52,8 @@ type BatchSubmitter struct {
 	cancelShutdownCtx context.CancelFunc
 	killCtx           context.Context
 	cancelKillCtx     context.CancelFunc
+
+	daClient *rollup.DAClient
 
 	mutex   sync.Mutex
 	running bool
@@ -70,6 +92,11 @@ func NewBatchSubmitterFromCLIConfig(cfg CLIConfig, l log.Logger, m metrics.Metri
 		return nil, fmt.Errorf("querying rollup config: %w", err)
 	}
 
+	dacfg, err := rollupClient.DataAvailabilityConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("querying da config: %w", err)
+	}
+
 	txManager, err := txmgr.NewSimpleTxManager("batcher", l, m, cfg.TxMgrConfig)
 	if err != nil {
 		return nil, err
@@ -84,6 +111,7 @@ func NewBatchSubmitterFromCLIConfig(cfg CLIConfig, l log.Logger, m metrics.Metri
 		NetworkTimeout:         cfg.TxMgrConfig.NetworkTimeout,
 		TxManager:              txManager,
 		Rollup:                 rcfg,
+		DAConfig:               dacfg,
 		Channel: ChannelConfig{
 			SeqWindowSize:      rcfg.SeqWindowSize,
 			ChannelTimeout:     rcfg.ChannelTimeout,
@@ -142,8 +170,13 @@ func (l *BatchSubmitter) Start() error {
 	l.wg.Add(1)
 	go l.loop()
 
-	l.log.Info("Batch Submitter started")
+	daClient, err := rollup.NewDAClient(l.DAConfig)
+	if err != nil {
+		return err
+	}
+	l.daClient = daClient
 
+	l.log.Info("Batch Submitter started")
 	return nil
 }
 
@@ -382,6 +415,30 @@ func (l *BatchSubmitter) publishTxToL1(ctx context.Context, queue *txmgr.Queue[t
 func (l *BatchSubmitter) sendTransaction(txdata txData, queue *txmgr.Queue[txData], receiptsCh chan txmgr.TxReceipt[txData]) {
 	// Do the gas estimation offline. A value of 0 will cause the [txmgr] to estimate the gas limit.
 	data := txdata.Bytes()
+
+	dataBlob, err := blob.NewBlobV0(l.daClient.Namespace, data)
+	com, err := blob.CreateCommitment(dataBlob)
+	if err != nil {
+		l.log.Warn("unable to create blob commitment to celestia", "err", err)
+		return
+	}
+	height, err := l.daClient.Client.Blob.Submit(l.killCtx, []*blob.Blob{dataBlob}, openrpc.DefaultSubmitOptions())
+	if err != nil {
+		l.log.Warn("unable to publish tx to celestia", "err", err)
+		return
+	}
+	if height == 0 {
+		l.log.Warn("unexpected response from celestia got", "height", height)
+		return
+	}
+	frameRef := celestia.FrameRef{
+		BlockHeight:  height,
+		TxCommitment: com,
+	}
+	frameRefData, _ := frameRef.MarshalBinary()
+	data = frameRefData
+	l.log.Info("submitting txdata", "celestia height", height, "txdata", hex.EncodeToString(frameRefData))
+
 	intrinsicGas, err := core.IntrinsicGas(data, nil, false, true, true, false)
 	if err != nil {
 		l.log.Error("Failed to calculate intrinsic gas", "error", err)
@@ -393,6 +450,7 @@ func (l *BatchSubmitter) sendTransaction(txdata txData, queue *txmgr.Queue[txDat
 		TxData:   data,
 		GasLimit: intrinsicGas,
 	}
+
 	queue.Send(txdata, candidate, receiptsCh)
 }
 

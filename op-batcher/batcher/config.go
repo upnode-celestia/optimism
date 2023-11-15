@@ -32,7 +32,8 @@ type Config struct {
 	MaxPendingTransactions uint64
 
 	// RollupConfig is queried at startup
-	Rollup *rollup.Config
+	Rollup   *rollup.Config
+	DAConfig *rollup.DAConfig
 
 	// Channel builder parameters
 	Channel ChannelConfig
