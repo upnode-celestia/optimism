@@ -396,7 +396,7 @@ func (eq *EngineQueue) postProcessSafeL2() {
 	if len(eq.finalityData) == 0 || eq.finalityData[len(eq.finalityData)-1].L1Block.Number < eq.origin.Number {
 		// append entry for new L1 block
 		eq.finalityData = append(eq.finalityData, FinalityData{
-			L2Block: eq.safeHead,
+			L2Block: eq.unsafeHead,
 			L1Block: eq.origin.ID(),
 		})
 		last := &eq.finalityData[len(eq.finalityData)-1]
