@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -152,7 +153,9 @@ func DataFromEVMTransactions(config *rollup.Config, daClient *rollup.DAClient, b
 				return nil, err
 			}
 			log.Info("requesting data from celestia", "namespace", hex.EncodeToString(daClient.Namespace), "height", frameRef.BlockHeight)
-			blob, err := daClient.Client.Blob.Get(context.Background(), frameRef.BlockHeight, daClient.Namespace, frameRef.TxCommitment)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.BlockTime)*time.Second)
+			defer cancel()
+			blob, err := daClient.Client.Blob.Get(ctx, frameRef.BlockHeight, daClient.Namespace, frameRef.TxCommitment)
 			if err != nil {
 				return nil, NewResetError(fmt.Errorf("failed to resolve frame from celestia: %w", err))
 			}
