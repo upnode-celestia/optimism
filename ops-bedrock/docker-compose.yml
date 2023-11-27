@@ -26,6 +26,8 @@ services:
       - "26650:26650"
       - "26658:26658"
       - "26659:26659"
+    environment:
+      CELESTIA_NAMESPACE: 000008e5f679bf7116cb
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:26659/header/1"]
       interval: 10s

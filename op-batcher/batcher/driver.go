@@ -356,16 +356,12 @@ func (l *BatchSubmitter) sendTransaction(txdata txData, queue *txmgr.Queue[txDat
 	data := txdata.Bytes()
 
 	ids, _, err := l.daClient.Client.Submit([][]byte{data})
-	if err != nil {
-		l.Log.Warn("celestia: unable to publish tx", "err", err)
-		return
+	if err == nil && len(ids) == 1 {
+		l.Log.Info("celestia: blob successfully submitted", "id", hex.EncodeToString(ids[0]))
+		data = append([]byte{derive.DerivationVersionCelestia}, ids[0]...)
+	} else {
+		l.Log.Info("celestia: blob submission failed; falling back to eth", "err", err)
 	}
-	if len(ids) != 1 {
-		l.Log.Warn("celestia: unexpected length for ids", "expected", 1, "got", len(ids))
-		return
-	}
-	data = ids[0]
-	l.Log.Info("celestia: blob successfully submitted", "id", hex.EncodeToString(data))
 
 	intrinsicGas, err := core.IntrinsicGas(data, nil, false, true, true, false)
 	if err != nil {
