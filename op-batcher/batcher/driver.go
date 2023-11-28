@@ -8,7 +8,6 @@ import (
 	"io"
 	"math/big"
 	_ "net/http/pprof"
-	"os"
 	"sync"
 	"time"
 
@@ -167,7 +166,7 @@ func (l *BatchSubmitter) Start() error {
 	l.wg.Add(1)
 	go l.loop()
 
-	daRpc := os.Getenv("OP_BATCHER_DA_RPC")
+	daRpc := l.DAConfig.RPC
 	if daRpc == "" {
 		daRpc = "localhost:26650"
 	}
