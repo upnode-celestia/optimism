@@ -8,6 +8,7 @@ import (
 	"io"
 	"math/big"
 	_ "net/http/pprof"
+	"os"
 	"sync"
 	"time"
 
@@ -170,7 +171,11 @@ func (l *BatchSubmitter) Start() error {
 	l.wg.Add(1)
 	go l.loop()
 
-	daClient, err := rollup.NewDAClient(l.DAConfig)
+	daRpc := os.Getenv("OP_BATCHER_DA_RPC")
+	if daRpc == "" {
+		daRpc = "localhost:26650"
+	}
+	daClient, err := rollup.NewDAClient(daRpc)
 	if err != nil {
 		return err
 	}
@@ -416,28 +421,13 @@ func (l *BatchSubmitter) sendTransaction(txdata txData, queue *txmgr.Queue[txDat
 	// Do the gas estimation offline. A value of 0 will cause the [txmgr] to estimate the gas limit.
 	data := txdata.Bytes()
 
-	dataBlob, err := blob.NewBlobV0(l.daClient.Namespace, data)
-	com, err := blob.CreateCommitment(dataBlob)
-	if err != nil {
-		l.log.Warn("unable to create blob commitment to celestia", "err", err)
-		return
+	ids, _, err := l.daClient.Client.Submit([][]byte{data})
+	if err == nil && len(ids) == 1 {
+		l.log.Info("celestia: blob successfully submitted", "id", hex.EncodeToString(ids[0]))
+		data = append([]byte{derive.DerivationVersionCelestia}, ids[0]...)
+	} else {
+		l.log.Info("celestia: blob submission failed; falling back to eth", "err", err)
 	}
-	height, err := l.daClient.Client.Blob.Submit(l.killCtx, []*blob.Blob{dataBlob}, openrpc.DefaultSubmitOptions())
-	if err != nil {
-		l.log.Warn("unable to publish tx to celestia", "err", err)
-		return
-	}
-	if height == 0 {
-		l.log.Warn("unexpected response from celestia got", "height", height)
-		return
-	}
-	frameRef := celestia.FrameRef{
-		BlockHeight:  height,
-		TxCommitment: com,
-	}
-	frameRefData, _ := frameRef.MarshalBinary()
-	data = frameRefData
-	l.log.Info("submitting txdata", "celestia height", height, "txdata", hex.EncodeToString(frameRefData))
 
 	intrinsicGas, err := core.IntrinsicGas(data, nil, false, true, true, false)
 	if err != nil {

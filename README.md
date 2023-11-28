@@ -6,7 +6,7 @@
   <br />
   <h3>+</h3>
   <a href="https://celestia.org"><img alt="Celestia" src="docs/op-stack/src/assets/docs/understand/Celestia-logo-color-color.svg" width=600></a>
-  <h3><a href="https://celestia.org">Celestia</a> is a modular consensus and data network, built to enable anyone to easily deploy their own blockchain with minimal overhead.</h3>
+  <h3><a href="https://celestia.org">Celestia</a> is a modular data availability network that securely scales with the number of users, making it easy for anyone to launch their own blockchain.</h3>
   <br />
 </div>
 
@@ -66,7 +66,7 @@ Celestia as the data availability (DA) layer.
 Currently, the tests assume a working [Celestia devnet](https://github.com/rollkit/local-celestia-devnet) running locally:
 
 ```bash
-docker run --platform linux/amd64 -p 26658:26658 ghcr.io/rollkit/local-celestia-devnet:v0.12.1
+docker run -p 26650:26650 ghcr.io/rollkit/local-celestia-devnet:v0.12.2
 ```
 
 The e2e tests can be triggered with:
@@ -74,7 +74,7 @@ The e2e tests can be triggered with:
 ```bash
 cd $HOME/optimism
 cd op-e2e
-make test
+OP_E2E_DISABLE_PARALLEL=true OP_E2E_CANNON_ENABLED=false OP_NODE_DA_RPC=localhost:26650 OP_BATCHER_DA_RPC=localhost:26650 make test
 ```
 
 ## Bridging
