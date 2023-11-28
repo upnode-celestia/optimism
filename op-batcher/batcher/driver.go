@@ -21,10 +21,6 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
-
-	"github.com/ethereum-optimism/optimism/op-celestia/celestia"
-	openrpc "github.com/rollkit/celestia-openrpc"
-	"github.com/rollkit/celestia-openrpc/types/blob"
 )
 
 var ErrBatcherNotRunning = errors.New("batcher is not running")
