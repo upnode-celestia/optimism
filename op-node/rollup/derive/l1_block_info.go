@@ -143,10 +143,16 @@ func L1InfoDepositTxData(data []byte) (L1BlockInfo, error) {
 // L1InfoDeposit creates a L1 Info deposit transaction based on the L1 block,
 // and the L2 block-height difference with the start of the epoch.
 func L1InfoDeposit(seqNumber uint64, block eth.BlockInfo, sysCfg eth.SystemConfig, regolith bool) (*types.DepositTx, error) {
+	// Celestia: Fix BaseFee at 0.01 gwei = 10,000,000 wei
+	// Celestia: This would keep L1FeeScalar about 0.5 and leave enough room for flexibility
+
+	// baseFee := block.BaseFee()
+	baseFee := big.NewInt(10000000)
+
 	infoDat := L1BlockInfo{
 		Number:         block.NumberU64(),
 		Time:           block.Time(),
-		BaseFee:        block.BaseFee(),
+		BaseFee:        baseFee,
 		BlockHash:      block.Hash(),
 		SequenceNumber: seqNumber,
 		BatcherAddr:    sysCfg.BatcherAddr,
