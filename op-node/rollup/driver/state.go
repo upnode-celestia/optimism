@@ -215,11 +215,30 @@ func (s *Driver) eventLoop() {
 	var sequencerCh <-chan time.Time
 	planSequencerAction := func() {
 		delay := s.sequencer.PlanNextSequencerAction()
+		s.log.Debug("Delay", delay)
 		sequencerCh = sequencerTimer.C
 		if len(sequencerCh) > 0 { // empty if not already drained before resetting
 			<-sequencerCh
 		}
 		sequencerTimer.Reset(delay)
+	}
+
+	sequencerStep := func() error {
+		payload, err := s.sequencer.RunNextSequencerAction(ctx)
+		if err != nil {
+			s.log.Error("Sequencer critical error", "err", err)
+			return err
+		}
+		if s.network != nil && payload != nil {
+			// Publishing of unsafe data via p2p is optional.
+			// Errors are not severe enough to change/halt sequencing but should be logged and metered.
+			if err := s.network.PublishL2Payload(ctx, payload); err != nil {
+				s.log.Warn("failed to publish newly created block", "id", payload.ID(), "err", err)
+				s.metrics.RecordPublishingError()
+			}
+		}
+		planSequencerAction() // schedule the next sequencer action to keep the sequencing looping
+		return nil
 	}
 
 	// Create a ticker to check if there is a gap in the engine queue. Whenever
@@ -251,7 +270,17 @@ func (s *Driver) eventLoop() {
 				// This may adjust at any time based on fork-choice changes or previous errors.
 				//
 				// update sequencer time if the head changed
-				planSequencerAction()
+				delay := s.sequencer.PlanNextSequencerAction()
+				if delay == 0 {
+					// immediately do sequencerStep if time is ready
+					if err := sequencerStep(); err != nil {
+						return
+					}
+					// sequencerStep was already done, so we continue to next round
+					continue
+				} else {
+					planSequencerAction()
+				}
 			}
 		} else {
 			sequencerCh = nil
@@ -266,20 +295,9 @@ func (s *Driver) eventLoop() {
 
 		select {
 		case <-sequencerCh:
-			payload, err := s.sequencer.RunNextSequencerAction(ctx)
-			if err != nil {
-				s.log.Error("Sequencer critical error", "err", err)
+			if err := sequencerStep(); err != nil {
 				return
 			}
-			if s.network != nil && payload != nil {
-				// Publishing of unsafe data via p2p is optional.
-				// Errors are not severe enough to change/halt sequencing but should be logged and metered.
-				if err := s.network.PublishL2Payload(ctx, payload); err != nil {
-					s.log.Warn("failed to publish newly created block", "id", payload.ID(), "err", err)
-					s.metrics.RecordPublishingError()
-				}
-			}
-			planSequencerAction() // schedule the next sequencer action to keep the sequencing looping
 		case <-altSyncTicker.C:
 			// Check if there is a gap in the current unsafe payload queue.
 			ctx, cancel := context.WithTimeout(ctx, time.Second*2)

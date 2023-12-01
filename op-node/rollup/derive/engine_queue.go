@@ -80,7 +80,8 @@ const maxUnsafePayloadsMemory = 500 * 1024 * 1024
 // The beacon chain on mainnet has 32 slots per epoch,
 // and new finalization events happen at most 4 epochs behind the head.
 // And then we add 1 to make pruning easier by leaving room for a new item without pruning the 32*4.
-const finalityLookback = 4*32 + 1
+// const finalityLookback = 4*32 + 1
+const finalityLookback = 32*32 + 1 // For base
 
 // finalityDelay is the number of L1 blocks to traverse before trying to finalize L2 blocks again.
 // We do not want to do this too often, since it requires fetching a L1 block by number, so no cache data.
@@ -376,6 +377,10 @@ func (eq *EngineQueue) tryFinalizeL2() {
 			eq.needForkchoiceUpdate = true
 		}
 	}
+	// Also move safe head if finalizedL2 head is greater
+	if finalizedL2.Number > eq.safeHead.Number {
+		eq.safeHead = finalizedL2
+	}
 	eq.finalized = finalizedL2
 	eq.metrics.RecordL2Ref("l2_finalized", finalizedL2)
 }
@@ -390,10 +395,18 @@ func (eq *EngineQueue) postProcessSafeL2() {
 	// remember the last L2 block that we fully derived from the given finality data
 	if len(eq.finalityData) == 0 || eq.finalityData[len(eq.finalityData)-1].L1Block.Number < eq.origin.Number {
 		// append entry for new L1 block
-		eq.finalityData = append(eq.finalityData, FinalityData{
-			L2Block: eq.safeHead,
-			L1Block: eq.origin.ID(),
-		})
+		if eq.safeHead.Number == 0 {
+			// Fix for L3 safeHead: 0 case struck the finalization process
+			eq.finalityData = append(eq.finalityData, FinalityData{
+				L2Block: eq.unsafeHead,
+				L1Block: eq.origin.ID(),
+			})
+		} else {
+			eq.finalityData = append(eq.finalityData, FinalityData{
+				L2Block: eq.safeHead,
+				L1Block: eq.origin.ID(),
+			})
+		}
 		last := &eq.finalityData[len(eq.finalityData)-1]
 		eq.log.Debug("extended finality-data", "last_l1", last.L1Block, "last_l2", last.L2Block)
 	} else {
