@@ -38,7 +38,6 @@ var (
 		Usage:   "HTTP provider URL for Rollup node",
 		EnvVars: prefixEnvVars("ROLLUP_RPC"),
 	}
-	// Optional flags
 	SubSafetyMarginFlag = &cli.Uint64Flag{
 		Name: "sub-safety-margin",
 		Usage: "The batcher tx submission safety margin (in #L1-blocks) to subtract " +
