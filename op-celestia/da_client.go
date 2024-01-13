@@ -1,13 +1,16 @@
-package rollup
+package celestia
 
 import (
+	"time"
+
 	"github.com/rollkit/go-da/proxy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
 type DAClient struct {
-	Client *proxy.Client
+	Client     *proxy.Client
+	GetTimeout time.Duration
 }
 
 func NewDAClient(rpc string) (*DAClient, error) {
@@ -17,6 +20,7 @@ func NewDAClient(rpc string) (*DAClient, error) {
 		return nil, err
 	}
 	return &DAClient{
-		Client: client,
+		Client:     client,
+		GetTimeout: time.Minute,
 	}, nil
 }

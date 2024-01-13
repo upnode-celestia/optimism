@@ -6,16 +6,26 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 
+	celestia "github.com/ethereum-optimism/optimism/op-celestia"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 )
+
+var daClient *celestia.DAClient
+
+func SetDAClient(c *celestia.DAClient) error {
+	if daClient != nil {
+		return errors.New("da client already configured")
+	}
+	daClient = c
+	return nil
+}
 
 type DataIter interface {
 	Next(ctx context.Context) (eth.Data, error)
@@ -148,9 +158,9 @@ func DataFromEVMTransactions(dsCfg DataSourceConfig, batcherAddr common.Address,
 				out = append(out, data)
 			default:
 				switch data[0] {
-				case DerivationVersionCelestia:
+				case celestia.DerivationVersionCelestia:
 					log.Info("celestia: blob request", "id", hex.EncodeToString(tx.Data()))
-					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Duration(config.BlockTime)*time.Second)
+					ctx, cancel := context.WithTimeout(context.Background(), daClient.GetTimeout)
 					blobs, err := daClient.Client.Get(ctx, [][]byte{data[1:]})
 					cancel()
 					if err != nil {

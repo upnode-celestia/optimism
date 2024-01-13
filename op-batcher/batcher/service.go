@@ -17,6 +17,7 @@ import (
 
 	"github.com/ethereum-optimism/optimism/op-batcher/metrics"
 	"github.com/ethereum-optimism/optimism/op-batcher/rpc"
+	celestia "github.com/ethereum-optimism/optimism/op-celestia"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 	"github.com/ethereum-optimism/optimism/op-service/dial"
@@ -66,6 +67,7 @@ type BatcherService struct {
 	stopped atomic.Bool
 
 	NotSubmittingOnStart bool
+	DAClient             *celestia.DAClient
 }
 
 // BatcherServiceFromCLIConfig creates a new BatcherService from a CLIConfig.
@@ -108,6 +110,9 @@ func (bs *BatcherService) initFromCLIConfig(ctx context.Context, version string,
 	}
 	if err := bs.initPProf(cfg); err != nil {
 		return fmt.Errorf("failed to start pprof server: %w", err)
+	}
+	if err := bs.initDA(cfg); err != nil {
+		return fmt.Errorf("failed to start da server: %w", err)
 	}
 	bs.initDriver()
 	if err := bs.initRPCServer(cfg); err != nil {
@@ -242,6 +247,7 @@ func (bs *BatcherService) initDriver() {
 		L1Client:         bs.L1Client,
 		EndpointProvider: bs.EndpointProvider,
 		ChannelConfig:    bs.ChannelConfig,
+		DAClient:         bs.DAClient,
 	})
 }
 
@@ -262,6 +268,15 @@ func (bs *BatcherService) initRPCServer(cfg *CLIConfig) error {
 		return fmt.Errorf("unable to start RPC server: %w", err)
 	}
 	bs.rpcServer = server
+	return nil
+}
+
+func (bs *BatcherService) initDA(cfg *CLIConfig) error {
+	client, err := celestia.NewDAClient(cfg.DaConfig.DaRpc)
+	if err != nil {
+		return err
+	}
+	bs.DAClient = client
 	return nil
 }
 
