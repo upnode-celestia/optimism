@@ -80,8 +80,8 @@ func validateReceipts(block eth.BlockID, receiptHash common.Hash, txHashes []com
 
 	// Sanity-check: external L1-RPC sources are notorious for not returning all receipts,
 	// or returning them out-of-order. Verify the receipts against the expected receipt-hash.
-	hasher := trie.NewStackTrie(nil)
-	computed := types.DeriveSha(types.Receipts(receipts), hasher)
+	// hasher := trie.NewStackTrie(nil)
+	// computed := types.DeriveSha(types.Receipts(receipts), hasher)
 
 	// TODO: Base mainnet fork critical bug
 	// if receiptHash != computed {
