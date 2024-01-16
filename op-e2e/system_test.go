@@ -31,6 +31,8 @@ import (
 	"github.com/ethereum-optimism/optimism/op-bindings/bindings"
 	"github.com/ethereum-optimism/optimism/op-bindings/predeploys"
 	"github.com/ethereum-optimism/optimism/op-e2e/config"
+	gethutils "github.com/ethereum-optimism/optimism/op-e2e/e2eutils/geth"
+	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/transactions"
 	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/wait"
 	"github.com/ethereum-optimism/optimism/op-node/metrics"
 	rollupNode "github.com/ethereum-optimism/optimism/op-node/node"
@@ -44,6 +46,31 @@ import (
 	"github.com/ethereum-optimism/optimism/op-service/sources"
 	"github.com/ethereum-optimism/optimism/op-service/testlog"
 )
+
+// TestSystemBatchType run each system e2e test case in singular batch mode and span batch mode.
+// If the test case tests batch submission and advancing safe head, it should be tested in both singular and span batch mode.
+func TestSystemBatchType(t *testing.T) {
+	tests := []struct {
+		name string
+		f    func(gt *testing.T, deltaTimeOffset *hexutil.Uint64)
+	}{
+		{"StopStartBatcher", StopStartBatcher},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name+"_SingularBatch", func(t *testing.T) {
+			test.f(t, nil)
+		})
+	}
+
+	deltaTimeOffset := hexutil.Uint64(0)
+	for _, test := range tests {
+		test := test
+		t.Run(test.name+"_SpanBatch", func(t *testing.T) {
+			test.f(t, &deltaTimeOffset)
+		})
+	}
+}
 
 func TestMain(m *testing.M) {
 	if config.ExternalL2Shim != "" {
@@ -130,6 +157,58 @@ func TestL2OutputSubmitter(t *testing.T) {
 	}
 }
 
+func TestSystemE2EDencunAtGenesis(t *testing.T) {
+	InitParallel(t)
+
+	cfg := DefaultSystemConfig(t)
+	genesisActivation := uint64(0)
+	cfg.DeployConfig.L1CancunTimeOffset = &genesisActivation
+
+	sys, err := cfg.Start(t)
+	require.Nil(t, err, "Error starting up system")
+	defer sys.Close()
+	runE2ESystemTest(t, sys)
+	head, err := sys.Clients["l1"].BlockByNumber(context.Background(), big.NewInt(0))
+	require.NoError(t, err)
+	require.NotNil(t, head.ExcessBlobGas(), "L1 is building dencun blocks since genesis")
+}
+
+// TestSystemE2EDencunAtGenesis tests if L2 finalizes when blobs are present on L1
+func TestSystemE2EDencunAtGenesisWithBlobs(t *testing.T) {
+	InitParallel(t)
+
+	cfg := DefaultSystemConfig(t)
+	//cancun is on from genesis:
+	genesisActivation := uint64(0)
+	cfg.DeployConfig.L1CancunTimeOffset = &genesisActivation // i.e. turn cancun on at genesis time + 0
+
+	sys, err := cfg.Start(t)
+	require.Nil(t, err, "Error starting up system")
+	defer sys.Close()
+
+	// send a blob-containing txn on l1
+	ethPrivKey := sys.Cfg.Secrets.Alice
+	txData := transactions.CreateEmptyBlobTx(ethPrivKey, true, sys.Cfg.L1ChainIDBig().Uint64())
+	tx := types.MustSignNewTx(ethPrivKey, types.LatestSignerForChainID(cfg.L1ChainIDBig()), txData)
+	// send blob-containing txn
+	sendCtx, sendCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer sendCancel()
+
+	l1Client := sys.Clients["l1"]
+	err = l1Client.SendTransaction(sendCtx, tx)
+	require.NoError(t, err, "Sending L1 empty blob tx")
+	// Wait for transaction on L1
+	blockContainsBlob, err := geth.WaitForTransaction(tx.Hash(), l1Client, 30*time.Duration(cfg.DeployConfig.L1BlockTime)*time.Second)
+	require.Nil(t, err, "Waiting for blob tx on L1")
+	// end sending blob-containing txns on l1
+	l2Client := sys.Clients["sequencer"]
+	finalizedBlock, err := gethutils.WaitForL1OriginOnL2(blockContainsBlob.BlockNumber.Uint64(), l2Client, 30*time.Duration(cfg.DeployConfig.L1BlockTime)*time.Second)
+	require.Nil(t, err, "Waiting for L1 origin of blob tx on L2")
+	finalizationTimeout := 30 * time.Duration(cfg.DeployConfig.L1BlockTime) * time.Second
+	_, err = gethutils.WaitForBlockToBeSafe(finalizedBlock.Header().Number, l2Client, finalizationTimeout)
+	require.Nil(t, err, "Waiting for safety of L2 block")
+}
+
 // TestSystemE2E sets up a L1 Geth node, a rollup node, and a L2 geth node and then confirms that L1 deposits are reflected on L2.
 // All nodes are run in process (but are the full nodes, not mocked or stubbed).
 func TestSystemE2E(t *testing.T) {
@@ -140,7 +219,9 @@ func TestSystemE2E(t *testing.T) {
 	sys, err := cfg.Start(t)
 	require.Nil(t, err, "Error starting up system")
 	defer sys.Close()
+}
 
+func runE2ESystemTest(t *testing.T, sys *System) {
 	log := testlog.Logger(t, log.LvlInfo)
 	log.Info("genesis", "l2", sys.RollupConfig.Genesis.L2, "l1", sys.RollupConfig.Genesis.L1, "l2_time", sys.RollupConfig.Genesis.L2Time)
 
@@ -149,10 +230,10 @@ func TestSystemE2E(t *testing.T) {
 	l2Verif := sys.Clients["verifier"]
 
 	// Transactor Account
-	ethPrivKey := sys.cfg.Secrets.Alice
+	ethPrivKey := sys.Cfg.Secrets.Alice
 
 	// Send Transaction & wait for success
-	fromAddr := sys.cfg.Secrets.Addresses().Alice
+	fromAddr := sys.Cfg.Secrets.Addresses().Alice
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -160,11 +241,11 @@ func TestSystemE2E(t *testing.T) {
 	require.Nil(t, err)
 
 	// Send deposit transaction
-	opts, err := bind.NewKeyedTransactorWithChainID(ethPrivKey, cfg.L1ChainIDBig())
+	opts, err := bind.NewKeyedTransactorWithChainID(ethPrivKey, sys.Cfg.L1ChainIDBig())
 	require.Nil(t, err)
 	mintAmount := big.NewInt(1_000_000_000_000)
 	opts.Value = mintAmount
-	SendDepositTx(t, cfg, l1Client, l2Verif, opts, func(l2Opts *DepositTxOpts) {})
+	SendDepositTx(t, sys.Cfg, l1Client, l2Verif, opts, func(l2Opts *DepositTxOpts) {})
 
 	// Confirm balance
 	ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
@@ -177,7 +258,7 @@ func TestSystemE2E(t *testing.T) {
 	require.Equal(t, mintAmount, diff, "Did not get expected balance change")
 
 	// Submit TX to L2 sequencer node
-	receipt := SendL2Tx(t, cfg, l2Seq, ethPrivKey, func(opts *TxOpts) {
+	receipt := SendL2Tx(t, sys.Cfg, l2Seq, ethPrivKey, func(opts *TxOpts) {
 		opts.Value = big.NewInt(1_000_000_000)
 		opts.Nonce = 1 // Already have deposit
 		opts.ToAddr = &common.Address{0xff, 0xff}
@@ -325,17 +406,8 @@ func TestFinalize(t *testing.T) {
 
 	l2Seq := sys.Clients["sequencer"]
 
-	// as configured in the extra geth lifecycle in testing setup
-	const finalizedDistance = 8
-	// Wait enough time for L1 to finalize and L2 to confirm its data in finalized L1 blocks
-	time.Sleep(time.Duration((finalizedDistance+6)*cfg.DeployConfig.L1BlockTime) * time.Second)
-
-	// fetch the finalizes head of geth
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-	l2Finalized, err := l2Seq.BlockByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
-	require.NoError(t, err)
-
+	l2Finalized, err := geth.WaitForBlockToBeFinalized(big.NewInt(12), l2Seq, 1*time.Minute)
+	require.NoError(t, err, "must be able to fetch a finalized L2 block")
 	require.NotZerof(t, l2Finalized.NumberU64(), "must have finalized L2 block")
 }
 
@@ -1222,10 +1294,11 @@ func TestFees(t *testing.T) {
 	require.Equal(t, balanceDiff, totalFee, "balances should add up")
 }
 
-func TestStopStartBatcher(t *testing.T) {
+func StopStartBatcher(t *testing.T, deltaTimeOffset *hexutil.Uint64) {
 	InitParallel(t)
 
 	cfg := DefaultSystemConfig(t)
+	cfg.DeployConfig.L2GenesisDeltaTimeOffset = deltaTimeOffset
 	sys, err := cfg.Start(t)
 	require.Nil(t, err, "Error starting up system")
 	defer sys.Close()
@@ -1259,6 +1332,7 @@ func TestStopStartBatcher(t *testing.T) {
 	safeBlockInclusionDuration := time.Duration(6*cfg.DeployConfig.L1BlockTime) * time.Second
 	_, err = geth.WaitForBlock(receipt.BlockNumber, l2Verif, safeBlockInclusionDuration)
 	require.Nil(t, err, "Waiting for block on verifier")
+	require.NoError(t, wait.ForProcessingFullBatch(context.Background(), rollupClient))
 
 	// ensure the safe chain advances
 	newSeqStatus, err := rollupClient.SyncStatus(context.Background())
@@ -1296,6 +1370,7 @@ func TestStopStartBatcher(t *testing.T) {
 	// wait until the block the tx was first included in shows up in the safe chain on the verifier
 	_, err = geth.WaitForBlock(receipt.BlockNumber, l2Verif, safeBlockInclusionDuration)
 	require.Nil(t, err, "Waiting for block on verifier")
+	require.NoError(t, wait.ForProcessingFullBatch(context.Background(), rollupClient))
 
 	// ensure that the safe chain advances after restarting the batcher
 	newSeqStatus, err = rollupClient.SyncStatus(context.Background())

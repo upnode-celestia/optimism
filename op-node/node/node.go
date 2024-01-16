@@ -30,6 +30,10 @@ import (
 	"github.com/ethereum-optimism/optimism/op-service/sources"
 )
 
+var (
+	ErrAlreadyClosed = errors.New("node is already closed")
+)
+
 type OpNode struct {
 	log        log.Logger
 	appVersion string
@@ -110,6 +114,9 @@ func (n *OpNode) init(ctx context.Context, cfg *Config, snapshotLog log.Logger) 
 	if err := n.initL1(ctx, cfg); err != nil {
 		return fmt.Errorf("failed to init L1: %w", err)
 	}
+	if err := n.initDA(ctx, cfg); err != nil {
+		return fmt.Errorf("failed to init da: %w", err)
+	}
 	if err := n.initL2(ctx, cfg, snapshotLog); err != nil {
 		return fmt.Errorf("failed to init L2: %w", err)
 	}
@@ -174,7 +181,7 @@ func (n *OpNode) initL1(ctx context.Context, cfg *Config) error {
 		if err != nil {
 			n.log.Warn("resubscribing after failed L1 subscription", "err", err)
 		}
-		return eth.WatchHeadChanges(n.resourcesCtx, n.l1Source, n.OnNewL1Head)
+		return eth.WatchHeadChanges(ctx, n.l1Source, n.OnNewL1Head)
 	})
 	go func() {
 		err, ok := <-n.l1HeadsSub.Err()
@@ -186,9 +193,9 @@ func (n *OpNode) initL1(ctx context.Context, cfg *Config) error {
 
 	// Poll for the safe L1 block and finalized block,
 	// which only change once per epoch at most and may be delayed.
-	n.l1SafeSub = eth.PollBlockChanges(n.resourcesCtx, n.log, n.l1Source, n.OnNewL1Safe, eth.Safe,
+	n.l1SafeSub = eth.PollBlockChanges(n.log, n.l1Source, n.OnNewL1Safe, eth.Safe,
 		cfg.L1EpochPollInterval, time.Second*10)
-	n.l1FinalizedSub = eth.PollBlockChanges(n.resourcesCtx, n.log, n.l1Source, n.OnNewL1Finalized, eth.Finalized,
+	n.l1FinalizedSub = eth.PollBlockChanges(n.log, n.l1Source, n.OnNewL1Finalized, eth.Finalized,
 		cfg.L1EpochPollInterval, time.Second*10)
 	return nil
 }
@@ -285,6 +292,10 @@ func (n *OpNode) initRuntimeConfig(ctx context.Context, cfg *Config) error {
 		close(n.runtimeConfigReloaderDone)
 	}(n.resourcesCtx, cfg.RuntimeConfigReloadInterval) // this keeps running after initialization
 	return nil
+}
+
+func (n *OpNode) initDA(ctx context.Context, cfg *Config) error {
+	return driver.SetDAClient(cfg.DaConfig)
 }
 
 func (n *OpNode) initL2(ctx context.Context, cfg *Config, snapshotLog log.Logger) error {
@@ -553,7 +564,7 @@ func (n *OpNode) RuntimeConfig() ReadonlyRuntimeConfig {
 // If the provided ctx is expired, the node will accelerate the stop where possible, but still fully close.
 func (n *OpNode) Stop(ctx context.Context) error {
 	if n.closed.Load() {
-		return errors.New("node is already closed")
+		return ErrAlreadyClosed
 	}
 
 	var result *multierror.Error
@@ -581,6 +592,14 @@ func (n *OpNode) Stop(ctx context.Context) error {
 	// stop L1 heads feed
 	if n.l1HeadsSub != nil {
 		n.l1HeadsSub.Unsubscribe()
+	}
+	// stop polling for L1 safe-head changes
+	if n.l1SafeSub != nil {
+		n.l1SafeSub.Unsubscribe()
+	}
+	// stop polling for L1 finalized-head changes
+	if n.l1FinalizedSub != nil {
+		n.l1FinalizedSub.Unsubscribe()
 	}
 
 	// close L2 driver

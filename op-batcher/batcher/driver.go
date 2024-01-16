@@ -17,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/ethereum-optimism/optimism/op-batcher/metrics"
+	celestia "github.com/ethereum-optimism/optimism/op-celestia"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
@@ -39,15 +40,16 @@ type RollupClient interface {
 
 // DriverSetup is the collection of input/output interfaces and configuration that the driver operates on.
 type DriverSetup struct {
-	Log          log.Logger
-	Metr         metrics.Metricer
-	RollupCfg    *rollup.Config
-	Cfg          BatcherConfig
-	Txmgr        txmgr.TxManager
-	L1Client     L1Client
-	L2Client     L2Client
-	RollupClient RollupClient
-	Channel      ChannelConfig
+	Log           log.Logger
+	Metr          metrics.Metricer
+	RollupConfig  *rollup.Config
+	Config        BatcherConfig
+	Txmgr         txmgr.TxManager
+	L1Client      L1Client
+	L2Client      L2Client
+	RollupClient  RollupClient
+	ChannelConfig ChannelConfig
+	DAClient      *celestia.DAClient
 }
 
 // BatchSubmitter encapsulates a service responsible for submitting L2 tx
@@ -78,7 +80,7 @@ type BatchSubmitter struct {
 func NewBatchSubmitter(setup DriverSetup) *BatchSubmitter {
 	return &BatchSubmitter{
 		DriverSetup: setup,
-		state:       NewChannelManager(setup.Log, setup.Metr, setup.Channel, setup.RollupCfg),
+		state:       NewChannelManager(setup.Log, setup.Metr, setup.ChannelConfig, setup.RollupConfig),
 	}
 }
 
@@ -185,7 +187,7 @@ func (l *BatchSubmitter) loadBlocksIntoState(ctx context.Context) error {
 		latestBlock = block
 	}
 
-	l2ref, err := derive.L2BlockToBlockRef(latestBlock, &l.RollupCfg.Genesis)
+	l2ref, err := derive.L2BlockToBlockRef(latestBlock, &l.RollupConfig.Genesis)
 	if err != nil {
 		l.Log.Warn("Invalid L2 block loaded into state", "err", err)
 		return err
@@ -197,7 +199,7 @@ func (l *BatchSubmitter) loadBlocksIntoState(ctx context.Context) error {
 
 // loadBlockIntoState fetches & stores a single block into `state`. It returns the block it loaded.
 func (l *BatchSubmitter) loadBlockIntoState(ctx context.Context, blockNumber uint64) (*types.Block, error) {
-	ctx, cancel := context.WithTimeout(ctx, l.Cfg.NetworkTimeout)
+	ctx, cancel := context.WithTimeout(ctx, l.Config.NetworkTimeout)
 	defer cancel()
 	block, err := l.L2Client.BlockByNumber(ctx, new(big.Int).SetUint64(blockNumber))
 	if err != nil {
@@ -215,7 +217,7 @@ func (l *BatchSubmitter) loadBlockIntoState(ctx context.Context, blockNumber uin
 // calculateL2BlockRangeToStore determines the range (start,end] that should be loaded into the local state.
 // It also takes care of initializing some local state (i.e. will modify l.lastStoredBlock in certain conditions)
 func (l *BatchSubmitter) calculateL2BlockRangeToStore(ctx context.Context) (eth.BlockID, eth.BlockID, error) {
-	ctx, cancel := context.WithTimeout(ctx, l.Cfg.NetworkTimeout)
+	ctx, cancel := context.WithTimeout(ctx, l.Config.NetworkTimeout)
 	defer cancel()
 	syncStatus, err := l.RollupClient.SyncStatus(ctx)
 	// Ensure that we have the sync status
@@ -258,11 +260,11 @@ func (l *BatchSubmitter) calculateL2BlockRangeToStore(ctx context.Context) (eth.
 func (l *BatchSubmitter) loop() {
 	defer l.wg.Done()
 
-	ticker := time.NewTicker(l.Cfg.PollInterval)
+	ticker := time.NewTicker(l.Config.PollInterval)
 	defer ticker.Stop()
 
 	receiptsCh := make(chan txmgr.TxReceipt[txData])
-	queue := txmgr.NewQueue[txData](l.killCtx, l.Txmgr, l.Cfg.MaxPendingTransactions)
+	queue := txmgr.NewQueue[txData](l.killCtx, l.Txmgr, l.Config.MaxPendingTransactions)
 
 	for {
 		select {
@@ -356,10 +358,12 @@ func (l *BatchSubmitter) sendTransaction(txdata txData, queue *txmgr.Queue[txDat
 	data := txdata.Bytes()
 
 	l.Log.Info("celestia: submitting blob to celestia")
-	ids, _, err := l.daClient.Client.Submit([][]byte{data}, 0.01)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Duration(l.RollupConfig.BlockTime)*time.Second)
+	ids, _, err := l.DAClient.Client.Submit(ctx, [][]byte{data}, -1)
+	cancel()
 	if err == nil && len(ids) == 1 {
 		l.Log.Info("celestia: blob successfully submitted", "id", hex.EncodeToString(ids[0]))
-		data = append([]byte{derive.DerivationVersionCelestia}, ids[0]...)
+		data = append([]byte{celestia.DerivationVersionCelestia}, ids[0]...)
 	} else {
 		l.Log.Info("celestia: blob submission failed; falling back to eth", "err", err)
 	}
@@ -371,7 +375,7 @@ func (l *BatchSubmitter) sendTransaction(txdata txData, queue *txmgr.Queue[txDat
 	}
 
 	candidate := txmgr.TxCandidate{
-		To:       &l.RollupCfg.BatchInboxAddress,
+		To:       &l.RollupConfig.BatchInboxAddress,
 		TxData:   data,
 		GasLimit: intrinsicGas,
 	}
@@ -412,7 +416,7 @@ func (l *BatchSubmitter) recordConfirmedTx(id txID, receipt *types.Receipt) {
 // l1Tip gets the current L1 tip as a L1BlockRef. The passed context is assumed
 // to be a lifetime context, so it is internally wrapped with a network timeout.
 func (l *BatchSubmitter) l1Tip(ctx context.Context) (eth.L1BlockRef, error) {
-	tctx, cancel := context.WithTimeout(ctx, l.Cfg.NetworkTimeout)
+	tctx, cancel := context.WithTimeout(ctx, l.Config.NetworkTimeout)
 	defer cancel()
 	head, err := l.L1Client.HeaderByNumber(tctx, nil)
 	if err != nil {

@@ -12,9 +12,20 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 
+	celestia "github.com/ethereum-optimism/optimism/op-celestia"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 )
+
+var daClient *celestia.DAClient
+
+func SetDAClient(c *celestia.DAClient) error {
+	if daClient != nil {
+		return errors.New("da client already configured")
+	}
+	daClient = c
+	return nil
+}
 
 type DataIter interface {
 	Next(ctx context.Context) (eth.Data, error)
@@ -29,17 +40,23 @@ type L1TransactionFetcher interface {
 // This is not a stage in the pipeline, but a wrapper for another stage in the pipeline
 type DataSourceFactory struct {
 	log     log.Logger
-	cfg     *rollup.Config
+	dsCfg   DataSourceConfig
 	fetcher L1TransactionFetcher
 }
 
 func NewDataSourceFactory(log log.Logger, cfg *rollup.Config, fetcher L1TransactionFetcher) *DataSourceFactory {
-	return &DataSourceFactory{log: log, cfg: cfg, fetcher: fetcher}
+	return &DataSourceFactory{log: log, dsCfg: DataSourceConfig{l1Signer: cfg.L1Signer(), batchInboxAddress: cfg.BatchInboxAddress}, fetcher: fetcher}
 }
 
 // OpenData returns a DataIter. This struct implements the `Next` function.
 func (ds *DataSourceFactory) OpenData(ctx context.Context, id eth.BlockID, batcherAddr common.Address) (DataIter, error) {
-	return NewDataSource(ctx, ds.log, ds.cfg, ds.fetcher, id, batcherAddr)
+	return NewDataSource(ctx, ds.log, ds.dsCfg, ds.fetcher, id, batcherAddr)
+}
+
+// DataSourceConfig regroups the mandatory rollup.Config fields needed for DataFromEVMTransactions.
+type DataSourceConfig struct {
+	l1Signer          types.Signer
+	batchInboxAddress common.Address
 }
 
 // DataSource is a fault tolerant approach to fetching data.
@@ -51,7 +68,7 @@ type DataSource struct {
 	data []eth.Data
 	// Required to re-attempt fetching
 	id      eth.BlockID
-	cfg     *rollup.Config // TODO: `DataFromEVMTransactions` should probably not take the full config
+	dsCfg   DataSourceConfig
 	fetcher L1TransactionFetcher
 	log     log.Logger
 
@@ -60,24 +77,25 @@ type DataSource struct {
 
 // NewDataSource creates a new calldata source. It suppresses errors in fetching the L1 block if they occur.
 // If there is an error, it will attempt to fetch the result on the next call to `Next`.
-func NewDataSource(ctx context.Context, log log.Logger, cfg *rollup.Config, fetcher L1TransactionFetcher, block eth.BlockID, batcherAddr common.Address) (DataIter, error) {
+func NewDataSource(ctx context.Context, log log.Logger, dsCfg DataSourceConfig, fetcher L1TransactionFetcher, block eth.BlockID, batcherAddr common.Address) (DataIter, error) {
 	_, txs, err := fetcher.InfoAndTxsByHash(ctx, block.Hash)
+
 	if err != nil {
 		return &DataSource{
 			open:        false,
 			id:          block,
-			cfg:         cfg,
+			dsCfg:       dsCfg,
 			fetcher:     fetcher,
 			log:         log,
 			batcherAddr: batcherAddr,
 		}, nil
 	} else {
-		data, err := DataFromEVMTransactions(cfg, batcherAddr, txs, log.New("origin", block))
+		data, err := DataFromEVMTransactions(dsCfg, batcherAddr, txs, log.New("origin", block))
 		if err != nil {
 			return &DataSource{
 				open:        false,
 				id:          block,
-				cfg:         cfg,
+				dsCfg:       dsCfg,
 				fetcher:     fetcher,
 				log:         log,
 				batcherAddr: batcherAddr,
@@ -97,7 +115,7 @@ func (ds *DataSource) Next(ctx context.Context) (eth.Data, error) {
 	if !ds.open {
 		if _, txs, err := ds.fetcher.InfoAndTxsByHash(ctx, ds.id.Hash); err == nil {
 			ds.open = true
-			ds.data, err = DataFromEVMTransactions(ds.cfg, ds.batcherAddr, txs, log.New("origin", ds.id))
+			ds.data, err = DataFromEVMTransactions(ds.dsCfg, ds.batcherAddr, txs, log.New("origin", ds.id))
 			if err != nil {
 				// already wrapped
 				return nil, err
@@ -120,19 +138,18 @@ func (ds *DataSource) Next(ctx context.Context) (eth.Data, error) {
 // DataFromEVMTransactions filters all of the transactions and returns the calldata from transactions
 // that are sent to the batch inbox address from the batch sender address.
 // This will return an empty array if no valid transactions are found.
-func DataFromEVMTransactions(config *rollup.Config, batcherAddr common.Address, txs types.Transactions, log log.Logger) ([]eth.Data, error) {
+func DataFromEVMTransactions(dsCfg DataSourceConfig, batcherAddr common.Address, txs types.Transactions, log log.Logger) ([]eth.Data, error) {
 	var out []eth.Data
-	l1Signer := config.L1Signer()
 	for j, tx := range txs {
-		if to := tx.To(); to != nil && *to == config.BatchInboxAddress {
-			seqDataSubmitter, err := l1Signer.Sender(tx) // optimization: only derive sender if To is correct
+		if to := tx.To(); to != nil && *to == dsCfg.batchInboxAddress {
+			seqDataSubmitter, err := dsCfg.l1Signer.Sender(tx) // optimization: only derive sender if To is correct
 			if err != nil {
-				log.Warn("tx in inbox with invalid signature", "index", j, "err", err)
+				log.Warn("tx in inbox with invalid signature", "index", j, "txHash", tx.Hash(), "err", err)
 				continue // bad signature, ignore
 			}
 			// some random L1 user might have sent a transaction to our batch inbox, ignore them
 			if seqDataSubmitter != batcherAddr {
-				log.Warn("tx in inbox with unauthorized submitter", "index", j, "err", err)
+				log.Warn("tx in inbox with unauthorized submitter", "index", j, "txHash", tx.Hash(), "err", err)
 				continue // not an authorized batch submitter, ignore
 			}
 			data := tx.Data()
@@ -141,9 +158,11 @@ func DataFromEVMTransactions(config *rollup.Config, batcherAddr common.Address, 
 				out = append(out, data)
 			default:
 				switch data[0] {
-				case DerivationVersionCelestia:
+				case celestia.DerivationVersionCelestia:
 					log.Info("celestia: blob request", "id", hex.EncodeToString(tx.Data()))
-					blobs, err := daClient.Client.Get([][]byte{data[1:]})
+					ctx, cancel := context.WithTimeout(context.Background(), daClient.GetTimeout)
+					blobs, err := daClient.Client.Get(ctx, [][]byte{data[1:]})
+					cancel()
 					if err != nil {
 						return nil, NewResetError(fmt.Errorf("celestia: failed to resolve frame: %w", err))
 					}
