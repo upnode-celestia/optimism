@@ -226,7 +226,7 @@ func (s *Driver) eventLoop() {
 	}
 
 	sequencerStep := func() error {
-		payload, err := s.sequencer.RunNextSequencerAction(ctx)
+		payload, err := s.sequencer.RunNextSequencerAction(s.driverCtx)
 		if err != nil {
 			s.log.Error("Sequencer critical error", "err", err)
 			return err
@@ -234,7 +234,7 @@ func (s *Driver) eventLoop() {
 		if s.network != nil && payload != nil {
 			// Publishing of unsafe data via p2p is optional.
 			// Errors are not severe enough to change/halt sequencing but should be logged and metered.
-			if err := s.network.PublishL2Payload(ctx, payload); err != nil {
+			if err := s.network.PublishL2Payload(s.driverCtx, payload); err != nil {
 				s.log.Warn("failed to publish newly created block", "id", payload.ID(), "err", err)
 				s.metrics.RecordPublishingError()
 			}
