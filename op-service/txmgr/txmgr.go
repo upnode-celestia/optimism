@@ -374,7 +374,7 @@ func (m *SimpleTxManager) publishTx(ctx context.Context, tx *types.Transaction, 
 
 		cCtx, cancel := context.WithTimeout(ctx, m.cfg.NetworkTimeout)
 		err := m.backend.SendTransaction(cCtx, tx)
-		cancel()
+		defer cancel()
 		sendState.ProcessSendError(err)
 
 		if err == nil {
@@ -391,6 +391,7 @@ func (m *SimpleTxManager) publishTx(ctx context.Context, tx *types.Transaction, 
 			m.metr.RPCError()
 			l.Warn("transaction send cancelled", "err", err)
 			m.metr.TxPublished("context_cancelled")
+			continue // retry with fee bump
 		case errStringMatch(err, txpool.ErrAlreadyKnown):
 			l.Warn("resubmitted already known transaction", "err", err)
 			m.metr.TxPublished("tx_already_known")
