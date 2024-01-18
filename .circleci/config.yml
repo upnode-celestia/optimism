@@ -3,7 +3,7 @@ version: 2.1
 parameters:
   ci_builder_image:
     type: string
-    default: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:v0.30.0
+    default: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:v0.34.0
   base_image:
     type: string
     default: ubuntu-2204:2022.07.1
@@ -155,12 +155,14 @@ jobs:
             - "node_modules"
       - run:
           name: Install dependencies
-          command: pnpm install --frozen-lockfile --offline
+          command: pnpm install:ci:offline
       - run:
           name: print forge version
           command: forge --version
       - run:
           name: Build monorepo
+          environment:
+            FOUNDRY_PROFILE: ci
           command: pnpm build
       - persist_to_workspace:
           root: "."
@@ -365,7 +367,7 @@ jobs:
       # populate node modules from the cache
       - run:
           name: Install dependencies
-          command: pnpm install --frozen-lockfile --prefer-offline
+          command: pnpm install:ci
       - run:
           name: print forge version
           command: forge --version
@@ -397,7 +399,7 @@ jobs:
       # populate node modules from the cache
       - run:
           name: Install dependencies
-          command: pnpm install --frozen-lockfile --prefer-offline
+          command: pnpm install:ci
       # Note: this step needs to come first because one of the later steps modifies the cache & forces a contracts rebuild
       - run:
           name: semver lock
@@ -475,8 +477,8 @@ jobs:
           patterns: contracts-bedrock
       - run:
           name: slither
-          command: |
-            pnpm slither:check || echo "Slither failed"
+          command: pnpm slither:check
+          working_directory: packages/contracts-bedrock
 
   contracts-bedrock-validate-spaces:
     docker:
@@ -491,7 +493,7 @@ jobs:
       - attach_workspace: { at: "." }
       - run:
           name: Install dependencies
-          command: pnpm install --frozen-lockfile --prefer-offline
+          command: pnpm install:ci
       - check-changed:
           patterns: contracts-bedrock
       - run:
@@ -509,6 +511,30 @@ jobs:
           name: check go bindings
           command: make && git diff --exit-code
           working_directory: op-bindings
+
+  bindgen-remote:
+    docker:
+      - image: <<pipeline.parameters.ci_builder_image>>
+    resource_class: xlarge
+    steps:
+      - checkout
+      - run:
+          name: bindgen remote bindings
+          command: make bindgen-remote && git diff --exit-code
+          working_directory: op-bindings
+      - notify-failures-on-develop
+
+  bindgen-test-e2e:
+    docker:
+      - image: <<pipeline.parameters.ci_builder_image>>
+    resource_class: xlarge
+    steps:
+      - checkout
+      - run:
+          name: bindgen test E2E
+          command: make test-bindgen-e2e
+          working_directory: op-bindings-e2e
+      - notify-failures-on-develop
 
   js-lint-test:
     parameters:
@@ -537,7 +563,7 @@ jobs:
       # populate node modules from the cache
       - run:
           name: Install dependencies
-          command: pnpm install --frozen-lockfile --prefer-offline
+          command: pnpm install:ci
       - run:
           name: Lint
           command: pnpm lint && git diff --exit-code
@@ -566,7 +592,7 @@ jobs:
       # populate node modules from the cache
       - run:
           name: Install dependencies
-          command: pnpm install --frozen-lockfile --prefer-offline
+          command: pnpm install:ci
       - run:
           name: Check generated and build
           command: pnpm generate:check
@@ -588,7 +614,7 @@ jobs:
       # populate node modules from the cache
       - run:
           name: Install dependencies
-          command: pnpm install --frozen-lockfile --prefer-offline
+          command: pnpm install:ci
       - run:
           name: anvil-l1
           background: true
@@ -652,7 +678,7 @@ jobs:
             npm i pnpm --global
       - run:
           name: pnpm dev deps
-          command: pnpm install --frozen-lockfile --prefer-offline
+          command: pnpm install:ci
       - run:
           name: specs toc
           command: pnpm lint:specs:toc && git diff --exit-code ./specs
@@ -672,7 +698,7 @@ jobs:
       - run:
           name: Install node_modules
           command: |
-            pnpm install --frozen-lockfile --prefer-offline
+            pnpm install:ci
       - run:
           name: Lint check
           command: |
@@ -856,11 +882,16 @@ jobs:
       - run:
           name: run tests
           command: |
+            mkdir -p /testlogs
+
             export OP_E2E_CANNON_ENABLED="<<parameters.cannon_enabled>>"
             # Note: We don't use circle CI test splits because we need to split by test name, not by package. There is an additional
             # constraint that gotestsum does not currently (nor likely will) accept files from different pacakges when building.
-            JUNIT_FILE=/tmp/test-results/<<parameters.module>>_<<parameters.target>>.xml make <<parameters.target>>
+            JUNIT_FILE=/tmp/test-results/<<parameters.module>>_<<parameters.target>>.xml make <<parameters.target>> 2>&1 | tee /testlogs/test.log
           working_directory: <<parameters.module>>
+      - store_artifacts:
+          path: /testlogs
+          when: always
       - store_test_results:
           path: /tmp/test-results
 
@@ -882,6 +913,7 @@ jobs:
         default: this-package-does-not-exist
     docker:
       - image: <<pipeline.parameters.ci_builder_image>>
+    resource_class: medium
     steps:
       - checkout
       - check-changed:
@@ -890,14 +922,14 @@ jobs:
           name: Lint
           command: make lint
           working_directory: <<parameters.working_directory>>
-      - store_test_results:
-          path: /test-results
       - run:
           name: Test
           command: |
             mkdir -p /test-results
-            gotestsum --junitfile /test-results/tests.xml
+            gotestsum  --format=standard-verbose --junitfile /test-results/tests.xml -- -parallel=2
           working_directory: <<parameters.working_directory>>
+      - store_test_results:
+          path: /test-results
       - when:
           condition:
             equal: [ true, <<parameters.build>> ]
@@ -943,8 +975,7 @@ jobs:
           working_directory: indexer
       - run:
           name: Install node_modules
-          command: pnpm install --frozen-lockfile --prefer-offline
-          working_directory: indexer/api-ts
+          command: pnpm install:ci
       - run:
           name: Install tygo
           command: go install github.com/gzuidhof/tygo@latest
@@ -1018,7 +1049,7 @@ jobs:
     steps:
       - checkout
       - check-changed:
-          patterns: op-(.+),packages,ops-bedrock
+          patterns: op-(.+),packages,ops-bedrock,bedrock-devnet
       - run:
           name: Install latest golang
           command: |
@@ -1060,7 +1091,7 @@ jobs:
       - run:
           name: Install and build
           command: |
-            pnpm install --frozen-lockfile --prefer-offline && pnpm build
+            pnpm install:ci && pnpm build
       - attach_workspace:
           at: /tmp/workspace
       - run:
@@ -1335,6 +1366,29 @@ jobs:
           name: Verify Values Match
           command: |
             ./ops/scripts/ci-match-values-between-files.sh "<< parameters.file1_path >>" "<< parameters.pattern_file1 >>" "<< parameters.file2_path >>" "<< parameters.pattern_file2 >>"
+
+  kontrol-tests:
+    docker:
+      - image: << pipeline.parameters.ci_builder_image >>
+    resource_class: xlarge
+    steps:
+      - checkout
+      - run:
+          name: Checkout Submodule
+          command: |
+            git submodule update --init --recursive
+      - check-changed:
+          patterns: contracts-bedrock/test/kontrol,contracts-bedrock/src/L1/OptimismPortal\.sol
+      - setup_remote_docker:
+          docker_layer_caching: true
+      - run:
+          name: Run Kontrol Tests
+          command: |
+            pnpm test:kontrol
+          working_directory: ./packages/contracts-bedrock
+      - store_artifacts:
+          path: ./packages/contracts-bedrock/kontrol-results_latest.tar.gz
+
 workflows:
   main:
     when:
@@ -1464,6 +1518,10 @@ workflows:
           module: op-challenger
           requires: ["op-stack-go-lint"]
       - go-test:
+          name: op-conductor-tests
+          module: op-conductor
+          requires: ["op-stack-go-lint"]
+      - go-test:
           name: op-program-tests
           module: op-program
           requires: ["op-stack-go-lint"]
@@ -1517,6 +1575,7 @@ workflows:
             - op-node-tests
             - op-proposer-tests
             - op-challenger-tests
+            - op-conductor-tests
             - op-program-tests
             - op-program-compat
             - op-service-tests
@@ -1560,6 +1619,12 @@ workflows:
           requires: ['op-stack-go-docker-build']
           save_image_tag: <<pipeline.git.revision>> # for devnet later
       - docker-build:
+          name: op-conductor-docker-build
+          docker_name: op-conductor
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          requires: ['op-stack-go-docker-build']
+          save_image_tag: <<pipeline.git.revision>> # for devnet later
+      - docker-build:
           name: op-heartbeat-docker-build
           docker_name: op-heartbeat
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
@@ -1587,6 +1652,7 @@ workflows:
       - check-generated-mocks-op-service
       - cannon-go-lint-and-test
       - cannon-build-test-vectors
+      - kontrol-tests
   release:
     when:
       not:
@@ -1679,6 +1745,21 @@ workflows:
             branches:
               ignore: /.*/
           docker_name: op-challenger
+          docker_tags: <<pipeline.git.revision>>
+          requires: ['op-stack-go-docker-build-release']
+          platforms: "linux/amd64,linux/arm64"
+          publish: true
+          release: true
+          context:
+            - oplabs-gcr-release
+      - docker-build:
+          name: op-conductor-docker-release
+          filters:
+            tags:
+              only: /^op-conductor\/v.*/
+            branches:
+              ignore: /.*/
+          docker_name: op-conductor
           docker_tags: <<pipeline.git.revision>>
           requires: ['op-stack-go-docker-build-release']
           platforms: "linux/amd64,linux/arm64"
@@ -1867,6 +1948,16 @@ workflows:
             - oplabs-gcr
             - slack
       - docker-build:
+          name: op-conductor-docker-publish
+          docker_name: op-conductor
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          requires: [ 'op-stack-go-docker-build-publish' ]
+          platforms: "linux/amd64,linux/arm64"
+          publish: true
+          context:
+            - oplabs-gcr
+            - slack
+      - docker-build:
           name: op-heartbeat-docker-publish
           docker_name: op-heartbeat
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
@@ -1912,3 +2003,16 @@ workflows:
           context:
             - oplabs-gcr
             - slack
+
+  scheduled-bindgen:
+    when:
+      equal: [ build_daily, <<pipeline.schedule.name>> ]
+    jobs:
+      - bindgen-remote:
+          context:
+            - slack
+            - oplabs-etherscan
+      - bindgen-test-e2e:
+          context:
+            - slack
+            - oplabs-etherscan

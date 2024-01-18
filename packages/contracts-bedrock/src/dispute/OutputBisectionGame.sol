@@ -6,8 +6,6 @@ import { IOutputBisectionGame } from "src/dispute/interfaces/IOutputBisectionGam
 import { IInitializable } from "src/dispute/interfaces/IInitializable.sol";
 import { IBondManager } from "src/dispute/interfaces/IBondManager.sol";
 import { IBigStepper, IPreimageOracle } from "src/dispute/interfaces/IBigStepper.sol";
-import { L2OutputOracle } from "src/L1/L2OutputOracle.sol";
-import { BlockOracle } from "src/dispute/BlockOracle.sol";
 
 import { Clone } from "src/libraries/Clone.sol";
 import { Types } from "src/libraries/Types.sol";
@@ -28,26 +26,26 @@ contract OutputBisectionGame is IOutputBisectionGame, Clone, ISemver {
 
     /// @notice The absolute prestate of the instruction trace. This is a constant that is defined
     ///         by the program that is being used to execute the trace.
-    Claim public immutable ABSOLUTE_PRESTATE;
+    Claim internal immutable ABSOLUTE_PRESTATE;
 
     /// @notice The max depth of the game.
-    uint256 public immutable MAX_GAME_DEPTH;
+    uint256 internal immutable MAX_GAME_DEPTH;
 
     /// @notice The max depth of the output bisection portion of the position tree. Immediately beneath
     ///         this depth, execution trace bisection begins.
-    uint256 public immutable SPLIT_DEPTH;
+    uint256 internal immutable SPLIT_DEPTH;
 
     /// @notice The duration of the game.
-    Duration public immutable GAME_DURATION;
+    Duration internal immutable GAME_DURATION;
 
     /// @notice An onchain VM that performs single instruction steps on a fault proof program trace.
-    IBigStepper public immutable VM;
+    IBigStepper internal immutable VM;
 
     /// @notice The genesis block number
-    uint256 public immutable GENESIS_BLOCK_NUMBER;
+    uint256 internal immutable GENESIS_BLOCK_NUMBER;
 
     /// @notice The genesis output root
-    Hash public immutable GENESIS_OUTPUT_ROOT;
+    Hash internal immutable GENESIS_OUTPUT_ROOT;
 
     /// @notice The game type ID
     GameType internal immutable GAME_TYPE;
@@ -83,8 +81,8 @@ contract OutputBisectionGame is IOutputBisectionGame, Clone, ISemver {
     bool internal subgameAtRootResolved;
 
     /// @notice Semantic version.
-    /// @custom:semver 0.0.13
-    string public constant version = "0.0.13";
+    /// @custom:semver 0.0.18
+    string public constant version = "0.0.18";
 
     /// @param _gameType The type ID of the game.
     /// @param _absolutePrestate The absolute prestate of the instruction trace.
@@ -105,9 +103,8 @@ contract OutputBisectionGame is IOutputBisectionGame, Clone, ISemver {
         Duration _gameDuration,
         IBigStepper _vm
     ) {
-        // The split depth cannot be greater than or equal to the max game depth, and it must
-        // be even due to the constraint laid out in `verifyExecBisectionRoot`
-        if (_splitDepth >= _maxGameDepth || _splitDepth % 2 != 0) revert InvalidSplitDepth();
+        // The split depth cannot be greater than or equal to the max game depth.
+        if (_splitDepth >= _maxGameDepth) revert InvalidSplitDepth();
 
         GAME_TYPE = _gameType;
         ABSOLUTE_PRESTATE = _absolutePrestate;
@@ -147,16 +144,20 @@ contract OutputBisectionGame is IOutputBisectionGame, Clone, ISemver {
             // prestate.
             // If the step is an attack at a trace index > 0, the prestate exists elsewhere in
             // the game state.
-            preStateClaim = stepPos.indexAtDepth() == 0
+            // NOTE: We localize the `indexAtDepth` for the current execution trace subgame by finding
+            //       the remainder of the index at depth divided by 2 ** (MAX_GAME_DEPTH - SPLIT_DEPTH),
+            //       which is the number of leaves in each execution trace subgame. This is so that we can
+            //       determine whether or not the step position is represents the `ABSOLUTE_PRESTATE`.
+            preStateClaim = (stepPos.indexAtDepth() % (1 << (MAX_GAME_DEPTH - SPLIT_DEPTH))) == 0
                 ? ABSOLUTE_PRESTATE
-                : findTraceAncestor(Position.wrap(Position.unwrap(parentPos) - 1), parent.parentIndex).claim;
+                : findTraceAncestor(Position.wrap(Position.unwrap(parentPos) - 1), parent.parentIndex, false).claim;
             // For all attacks, the poststate is the parent claim.
             postState = parent;
         } else {
             // If the step is a defense, the poststate exists elsewhere in the game state,
             // and the parent claim is the expected pre-state.
             preStateClaim = parent.claim;
-            postState = findTraceAncestor(Position.wrap(Position.unwrap(parentPos) + 1), parent.parentIndex);
+            postState = findTraceAncestor(Position.wrap(Position.unwrap(parentPos) + 1), parent.parentIndex, false);
         }
 
         // INVARIANT: The prestate is always invalid if the passed `_stateData` is not the
@@ -197,28 +198,34 @@ contract OutputBisectionGame is IOutputBisectionGame, Clone, ISemver {
         // INVARIANT: Moves cannot be made unless the game is currently in progress.
         if (status != GameStatus.IN_PROGRESS) revert GameNotInProgress();
 
-        // INVARIANT: A defense can never be made against the root claim. This is because the root
-        //            claim commits to the entire state. Therefore, the only valid defense is to
-        //            do nothing if it is agreed with.
-        if (_challengeIndex == 0 && !_isAttack) revert CannotDefendRootClaim();
-
         // Get the parent. If it does not exist, the call will revert with OOB.
         ClaimData memory parent = claimData[_challengeIndex];
 
         // Compute the position that the claim commits to. Because the parent's position is already
         // known, we can compute the next position by moving left or right depending on whether
         // or not the move is an attack or defense.
-        Position nextPosition = parent.position.move(_isAttack);
+        Position parentPos = parent.position;
+        Position nextPosition = parentPos.move(_isAttack);
+        uint256 nextPositionDepth = nextPosition.depth();
+
+        // INVARIANT: A defense can never be made against the root claim of either the output root game or any
+        //            of the execution trace bisection subgames. This is because the root claim commits to the
+        //            entire state. Therefore, the only valid defense is to do nothing if it is agreed with.
+        if ((_challengeIndex == 0 || nextPositionDepth == SPLIT_DEPTH + 2) && !_isAttack) {
+            revert CannotDefendRootClaim();
+        }
 
         // INVARIANT: A move can never surpass the `MAX_GAME_DEPTH`. The only option to counter a
         //            claim at this depth is to perform a single instruction step on-chain via
         //            the `step` function to prove that the state transition produces an unexpected
         //            post-state.
-        if (nextPosition.depth() > MAX_GAME_DEPTH) revert GameDepthExceeded();
+        if (nextPositionDepth > MAX_GAME_DEPTH) revert GameDepthExceeded();
 
         // When the next position surpasses the split depth (i.e., it is the root claim of an execution
         // trace bisection sub-game), we need to perform some extra verification steps.
-        if (nextPosition.depth() == SPLIT_DEPTH + 1) verifyExecBisectionRoot(_claim);
+        if (nextPositionDepth == SPLIT_DEPTH + 1) {
+            verifyExecBisectionRoot(_claim, _challengeIndex, parentPos, _isAttack);
+        }
 
         // Fetch the grandparent clock, if it exists.
         // The grandparent clock should always exist unless the parent is the root claim.
@@ -296,16 +303,16 @@ contract OutputBisectionGame is IOutputBisectionGame, Clone, ISemver {
         Hash uuid = computeLocalContext(starting, startingPos, disputed, disputedPos);
 
         IPreimageOracle oracle = VM.oracle();
-        if (_ident == 1) {
+        if (_ident == LocalPreimageKey.L1_HEAD_HASH) {
             // Load the L1 head hash
             oracle.loadLocalData(_ident, Hash.unwrap(uuid), Hash.unwrap(l1Head), 32, _partOffset);
-        } else if (_ident == 2) {
+        } else if (_ident == LocalPreimageKey.STARTING_OUTPUT_ROOT) {
             // Load the starting proposal's output root.
             oracle.loadLocalData(_ident, Hash.unwrap(uuid), Claim.unwrap(starting), 32, _partOffset);
-        } else if (_ident == 3) {
+        } else if (_ident == LocalPreimageKey.DISPUTED_OUTPUT_ROOT) {
             // Load the disputed proposal's output root
             oracle.loadLocalData(_ident, Hash.unwrap(uuid), Claim.unwrap(disputed), 32, _partOffset);
-        } else if (_ident == 4) {
+        } else if (_ident == LocalPreimageKey.STARTING_L2_BLOCK_NUMBER) {
             // Load the starting proposal's L2 block number as a big-endian uint64 in the
             // high order 8 bytes of the word.
 
@@ -313,10 +320,10 @@ contract OutputBisectionGame is IOutputBisectionGame, Clone, ISemver {
             // we add the index at depth + 1 to the genesis block number to get the L2 block number.
             uint256 l2Number = Position.unwrap(startingPos) == 0
                 ? GENESIS_BLOCK_NUMBER
-                : GENESIS_BLOCK_NUMBER + startingPos.indexAtDepth() + 1;
+                : GENESIS_BLOCK_NUMBER + startingPos.traceIndex(SPLIT_DEPTH) + 1;
 
             oracle.loadLocalData(_ident, Hash.unwrap(uuid), bytes32(l2Number << 0xC0), 8, _partOffset);
-        } else if (_ident == 5) {
+        } else if (_ident == LocalPreimageKey.CHAIN_ID) {
             // Load the chain ID as a big-endian uint64 in the high order 8 bytes of the word.
             oracle.loadLocalData(_ident, Hash.unwrap(uuid), bytes32(block.chainid << 0xC0), 8, _partOffset);
         } else {
@@ -436,9 +443,29 @@ contract OutputBisectionGame is IOutputBisectionGame, Clone, ISemver {
         //
         // Implicit assumptions:
         // - The `gameStatus` state variable defaults to 0, which is `GameStatus.IN_PROGRESS`
+        //
+        // Explicit checks:
+        // - An output root cannot be proposed at or before the genesis block.
+
+        // Do not allow the game to be initialized if the root claim corresponds to a block at or before the
+        // configured genesis block number.
+        if (l2BlockNumber() <= GENESIS_BLOCK_NUMBER) revert UnexpectedRootClaim(rootClaim());
 
         // Set the game's starting timestamp
         createdAt = Timestamp.wrap(uint64(block.timestamp));
+
+        // Revert if the calldata size is too large, which signals that the `extraData` contains more than expected.
+        // This is to prevent adding extra bytes to the `extraData` that result in a different game UUID in the factory,
+        // but are not used by the game, which would allow for multiple dispute games for the same output proposal to
+        // be created.
+        // Expected length: 0x46 (0x04 selector + 0x20 root claim + 0x20 extraData + 0x02 CWIA bytes)
+        assembly {
+            if gt(calldatasize(), 0x46) {
+                // Store the selector for `ExtraDataTooLong()` & revert
+                mstore(0x00, 0xc407e025)
+                revert(0x1C, 0x04)
+            }
+        }
 
         // Set the root claim
         claimData.push(
@@ -461,17 +488,82 @@ contract OutputBisectionGame is IOutputBisectionGame, Clone, ISemver {
     }
 
     ////////////////////////////////////////////////////////////////
+    //                     IMMUTABLE GETTERS                      //
+    ////////////////////////////////////////////////////////////////
+
+    /// @notice Returns the absolute prestate of the instruction trace.
+    function absolutePrestate() external view returns (Claim absolutePrestate_) {
+        absolutePrestate_ = ABSOLUTE_PRESTATE;
+    }
+
+    /// @notice Returns the max game depth.
+    function maxGameDepth() external view returns (uint256 maxGameDepth_) {
+        maxGameDepth_ = MAX_GAME_DEPTH;
+    }
+
+    /// @notice Returns the split depth.
+    function splitDepth() external view returns (uint256 splitDepth_) {
+        splitDepth_ = SPLIT_DEPTH;
+    }
+
+    /// @notice Returns the game duration.
+    function gameDuration() external view returns (Duration gameDuration_) {
+        gameDuration_ = GAME_DURATION;
+    }
+
+    /// @notice Returns the address of the VM.
+    function vm() external view returns (IBigStepper vm_) {
+        vm_ = VM;
+    }
+
+    /// @notice Returns the genesis block number.
+    function genesisBlockNumber() external view returns (uint256 genesisBlockNumber_) {
+        genesisBlockNumber_ = GENESIS_BLOCK_NUMBER;
+    }
+
+    /// @notice Returns the genesis output root.
+    function genesisOutputRoot() external view returns (Hash genesisOutputRoot_) {
+        genesisOutputRoot_ = GENESIS_OUTPUT_ROOT;
+    }
+
+    ////////////////////////////////////////////////////////////////
     //                          HELPERS                           //
     ////////////////////////////////////////////////////////////////
 
     /// @notice Verifies the integrity of an execution bisection subgame's root claim. Reverts if the claim
     ///         is invalid.
     /// @param _rootClaim The root claim of the execution bisection subgame.
-    function verifyExecBisectionRoot(Claim _rootClaim) internal pure {
-        // The VMStatus must indicate 'invalid' (1), to argue that disputed thing is invalid.
-        // Games that agree with the existing outcome are not allowed.
+    function verifyExecBisectionRoot(
+        Claim _rootClaim,
+        uint256 _parentIdx,
+        Position _parentPos,
+        bool _isAttack
+    )
+        internal
+        view
+    {
+        // The root claim of an execution trace bisection sub-game must:
+        // 1. Signal that the VM panicked or resulted in an invalid transition if the disputed output root
+        //    was made by the opposing party.
+        // 2. Signal that the VM resulted in a valid transition if the disputed output root was made by the same party.
+
+        // If the move is a defense, the disputed output could have been made by either party. In this case, we
+        // need to search for the parent output to determine what the expected status byte should be.
+        Position disputedLeafPos = Position.wrap(Position.unwrap(_parentPos) + 1);
+        ClaimData storage disputed = findTraceAncestor({ _pos: disputedLeafPos, _start: _parentIdx, _global: true });
         uint8 vmStatus = uint8(Claim.unwrap(_rootClaim)[0]);
-        if (!(vmStatus == VMStatus.unwrap(VMStatuses.INVALID) || vmStatus == VMStatus.unwrap(VMStatuses.PANIC))) {
+
+        if (_isAttack || disputed.position.depth() % 2 == SPLIT_DEPTH % 2) {
+            // If the move is an attack, the parent output is always deemed to be disputed. In this case, we only need
+            // to check that the root claim signals that the VM panicked or resulted in an invalid transition.
+            // If the move is a defense, and the disputed output and creator of the execution trace subgame disagree,
+            // the root claim should also signal that the VM panicked or resulted in an invalid transition.
+            if (!(vmStatus == VMStatus.unwrap(VMStatuses.INVALID) || vmStatus == VMStatus.unwrap(VMStatuses.PANIC))) {
+                revert UnexpectedRootClaim(_rootClaim);
+            }
+        } else if (vmStatus != VMStatus.unwrap(VMStatuses.VALID)) {
+            // The disputed output and the creator of the execution trace subgame agree. The status byte should
+            // have signaled that the VM succeeded.
             revert UnexpectedRootClaim(_rootClaim);
         }
     }
@@ -479,15 +571,25 @@ contract OutputBisectionGame is IOutputBisectionGame, Clone, ISemver {
     /// @notice Finds the trace ancestor of a given position within the DAG.
     /// @param _pos The position to find the trace ancestor claim of.
     /// @param _start The index to start searching from.
+    /// @param _global Whether or not to search the entire dag or just within an execution trace subgame. If set to
+    ///                `true`, and `_pos` is at or above the split depth, this function will revert.
     /// @return ancestor_ The ancestor claim that commits to the same trace index as `_pos`.
-    function findTraceAncestor(Position _pos, uint256 _start) internal view returns (ClaimData storage ancestor_) {
+    function findTraceAncestor(
+        Position _pos,
+        uint256 _start,
+        bool _global
+    )
+        internal
+        view
+        returns (ClaimData storage ancestor_)
+    {
         // Grab the trace ancestor's expected position.
-        Position preStateTraceAncestor = _pos.traceAncestor();
+        Position traceAncestorPos = _global ? _pos.traceAncestor() : _pos.traceAncestorBounded(SPLIT_DEPTH);
 
         // Walk up the DAG to find a claim that commits to the same trace index as `_pos`. It is
         // guaranteed that such a claim exists.
         ancestor_ = claimData[_start];
-        while (Position.unwrap(ancestor_.position) != Position.unwrap(preStateTraceAncestor)) {
+        while (Position.unwrap(ancestor_.position) != Position.unwrap(traceAncestorPos)) {
             ancestor_ = claimData[ancestor_.parentIndex];
         }
     }
@@ -547,14 +649,16 @@ contract OutputBisectionGame is IOutputBisectionGame, Clone, ISemver {
             // starting claim nor position exists in the tree. We leave these as 0, which can be easily
             // identified due to 0 being an invalid Gindex.
             if (outputPos.indexAtDepth() > 0) {
-                ClaimData storage starting = findTraceAncestor(Position.wrap(Position.unwrap(outputPos) - 1), claimIdx);
+                ClaimData storage starting =
+                    findTraceAncestor(Position.wrap(Position.unwrap(outputPos) - 1), claimIdx, true);
                 (startingClaim_, startingPos_) = (starting.claim, starting.position);
             } else {
                 startingClaim_ = Claim.wrap(Hash.unwrap(GENESIS_OUTPUT_ROOT));
             }
             (disputedClaim_, disputedPos_) = (claim.claim, claim.position);
         } else {
-            ClaimData storage disputed = findTraceAncestor(Position.wrap(Position.unwrap(outputPos) + 1), claimIdx);
+            ClaimData storage disputed =
+                findTraceAncestor(Position.wrap(Position.unwrap(outputPos) + 1), claimIdx, true);
             (startingClaim_, startingPos_) = (claim.claim, claim.position);
             (disputedClaim_, disputedPos_) = (disputed.claim, disputed.position);
         }

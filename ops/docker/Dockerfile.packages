@@ -73,13 +73,15 @@ WORKDIR /opt/optimism
 COPY --from=manifests /tmp/manifests  ./
 COPY *.json ./
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install:ci
 
 COPY ./packages ./packages
 
 COPY .git/ ./.git
 COPY .gitmodules ./.gitmodules
 RUN git submodule update --init --recursive
+
+COPY --from=1password/op:2 /usr/local/bin/op /usr/local/bin/op
 
 RUN pnpm build
 
@@ -104,7 +106,6 @@ CMD ["start:fault-mon"]
 
 from base as multisig-mon
 WORKDIR /opt/optimism/packages/multisig-mon
-COPY --from=1password/op:2 /usr/local/bin/op /usr/local/bin/op
 CMD ["start:multisig-mon"]
 
 FROM base as replica-mon

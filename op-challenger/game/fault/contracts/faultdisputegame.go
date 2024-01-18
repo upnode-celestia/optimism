@@ -30,6 +30,7 @@ func NewFaultDisputeGameContract(addr common.Address, caller *batching.MultiCall
 		disputeGameContract: disputeGameContract{
 			multiCaller: caller,
 			contract:    batching.NewBoundContract(fdgAbi, addr),
+			version:     0,
 		},
 	}, nil
 }
@@ -58,7 +59,7 @@ func (f *FaultDisputeGameContract) addLocalDataTx(data *types.PreimageOracleData
 	call := f.contract.Call(
 		methodAddLocalData,
 		data.GetIdent(),
-		data.LocalContext,
+		types.NoLocalContext,
 		new(big.Int).SetUint64(uint64(data.OracleOffset)),
 	)
 	return call.ToTxCandidate()

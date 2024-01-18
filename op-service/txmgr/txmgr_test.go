@@ -19,6 +19,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 type sendTransactionFunc func(ctx context.Context, tx *types.Transaction) error
@@ -211,6 +212,9 @@ func (b *mockBackend) EstimateGas(ctx context.Context, msg ethereum.CallMsg) (ui
 	if b.g.err != nil {
 		return 0, b.g.err
 	}
+	if msg.GasFeeCap.Cmp(msg.GasTipCap) < 0 {
+		return 0, core.ErrTipAboveFeeCap
+	}
 	return b.g.basefee().Uint64(), nil
 }
 
@@ -239,11 +243,10 @@ func (*mockBackend) ChainID(ctx context.Context) (*big.Int, error) {
 }
 
 // TransactionReceipt queries the mockBackend for a mined txHash. If none is
-// found, nil is returned for both return values. Otherwise, it retruns a
+// found, nil is returned for both return values. Otherwise, it returns a
 // receipt containing the txHash and the gasFeeCap used in the GasUsed to make
 // the value accessible from our test framework.
 func (b *mockBackend) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
-
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -711,8 +714,8 @@ func (b *failingBackend) BlockNumber(ctx context.Context) (uint64, error) {
 // TransactionReceipt for the failingBackend returns errRpcFailure on the first
 // invocation, and a receipt containing the passed TxHash on the second.
 func (b *failingBackend) TransactionReceipt(
-	ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
-
+	ctx context.Context, txHash common.Hash,
+) (*types.Receipt, error) {
 	if !b.returnSuccessReceipt {
 		b.returnSuccessReceipt = true
 		return nil, errRpcFailure
@@ -836,6 +839,14 @@ func TestIncreaseGasPrice(t *testing.T) {
 		run  func(t *testing.T)
 	}{
 		{
+			name: "bump at least 1",
+			run: func(t *testing.T) {
+				tx, newTx := doGasPriceIncrease(t, 1, 3, 1, 1)
+				require.True(t, newTx.GasFeeCap().Cmp(tx.GasFeeCap()) > 0, "new tx fee cap must be larger")
+				require.True(t, newTx.GasTipCap().Cmp(tx.GasTipCap()) > 0, "new tx tip must be larger")
+			},
+		},
+		{
 			name: "enforces min bump",
 			run: func(t *testing.T) {
 				tx, newTx := doGasPriceIncrease(t, 100, 1000, 101, 460)
@@ -891,9 +902,32 @@ func TestIncreaseGasPrice(t *testing.T) {
 	}
 }
 
-// TestIncreaseGasPriceNotExponential asserts that if the L1 basefee & tip remain the
-// same, repeated calls to IncreaseGasPrice do not continually increase the gas price.
-func TestIncreaseGasPriceNotExponential(t *testing.T) {
+// TestIncreaseGasPriceLimits asserts that if the L1 basefee & tip remain the
+// same, repeated calls to IncreaseGasPrice eventually hit a limit.
+func TestIncreaseGasPriceLimits(t *testing.T) {
+	t.Run("no-threshold", func(t *testing.T) {
+		testIncreaseGasPriceLimit(t, gasPriceLimitTest{
+			expTipCap: 46,
+			expFeeCap: 354, // just below 5*100
+		})
+	})
+	t.Run("with-threshold", func(t *testing.T) {
+		testIncreaseGasPriceLimit(t, gasPriceLimitTest{
+			thr:       big.NewInt(params.GWei),
+			expTipCap: 131_326_987,
+			expFeeCap: 933_286_308, // just below 1 gwei
+		})
+	})
+}
+
+type gasPriceLimitTest struct {
+	thr                  *big.Int
+	expTipCap, expFeeCap int64
+}
+
+// testIncreaseGasPriceLimit runs a gas bumping test that increases the gas price until it hits an error.
+// It starts with a tx that has a tip cap of 10 wei and fee cap of 100 wei.
+func testIncreaseGasPriceLimit(t *testing.T, lt gasPriceLimitTest) {
 	t.Parallel()
 
 	borkedTip := int64(10)
@@ -910,6 +944,7 @@ func TestIncreaseGasPriceNotExponential(t *testing.T) {
 			NumConfirmations:          1,
 			SafeAbortNonceTooLowCount: 3,
 			FeeLimitMultiplier:        5,
+			FeeLimitThreshold:         lt.thr,
 			Signer: func(ctx context.Context, from common.Address, tx *types.Transaction) (*types.Transaction, error) {
 				return tx, nil
 			},
@@ -934,10 +969,11 @@ func TestIncreaseGasPriceNotExponential(t *testing.T) {
 		}
 		tx = newTx
 	}
+
 	lastTip, lastFee := tx.GasTipCap(), tx.GasFeeCap()
-	require.Equal(t, lastTip.Int64(), int64(36))
-	require.Equal(t, lastFee.Int64(), int64(493))
-	// Confirm that fees stop rising
+	// Confirm that fees only rose until expected threshold
+	require.Equal(t, lt.expTipCap, lastTip.Int64())
+	require.Equal(t, lt.expFeeCap, lastFee.Int64())
 	_, err := mgr.increaseGasPrice(ctx, tx)
 	require.Error(t, err)
 }

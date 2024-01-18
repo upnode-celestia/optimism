@@ -20,6 +20,7 @@ import (
 	celestia "github.com/ethereum-optimism/optimism/op-celestia"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
+	"github.com/ethereum-optimism/optimism/op-service/dial"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/txmgr"
 )
@@ -40,16 +41,15 @@ type RollupClient interface {
 
 // DriverSetup is the collection of input/output interfaces and configuration that the driver operates on.
 type DriverSetup struct {
-	Log           log.Logger
-	Metr          metrics.Metricer
-	RollupConfig  *rollup.Config
-	Config        BatcherConfig
-	Txmgr         txmgr.TxManager
-	L1Client      L1Client
-	L2Client      L2Client
-	RollupClient  RollupClient
-	ChannelConfig ChannelConfig
-	DAClient      *celestia.DAClient
+	Log              log.Logger
+	Metr             metrics.Metricer
+	RollupConfig     *rollup.Config
+	Config           BatcherConfig
+	Txmgr            txmgr.TxManager
+	L1Client         L1Client
+	EndpointProvider dial.L2EndpointProvider
+	ChannelConfig    ChannelConfig
+	DAClient         *celestia.DAClient
 }
 
 // BatchSubmitter encapsulates a service responsible for submitting L2 tx
@@ -201,7 +201,11 @@ func (l *BatchSubmitter) loadBlocksIntoState(ctx context.Context) error {
 func (l *BatchSubmitter) loadBlockIntoState(ctx context.Context, blockNumber uint64) (*types.Block, error) {
 	ctx, cancel := context.WithTimeout(ctx, l.Config.NetworkTimeout)
 	defer cancel()
-	block, err := l.L2Client.BlockByNumber(ctx, new(big.Int).SetUint64(blockNumber))
+	l2Client, err := l.EndpointProvider.EthClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting L2 client: %w", err)
+	}
+	block, err := l2Client.BlockByNumber(ctx, new(big.Int).SetUint64(blockNumber))
 	if err != nil {
 		return nil, fmt.Errorf("getting L2 block: %w", err)
 	}
@@ -219,7 +223,11 @@ func (l *BatchSubmitter) loadBlockIntoState(ctx context.Context, blockNumber uin
 func (l *BatchSubmitter) calculateL2BlockRangeToStore(ctx context.Context) (eth.BlockID, eth.BlockID, error) {
 	ctx, cancel := context.WithTimeout(ctx, l.Config.NetworkTimeout)
 	defer cancel()
-	syncStatus, err := l.RollupClient.SyncStatus(ctx)
+	rollupClient, err := l.EndpointProvider.RollupClient(ctx)
+	if err != nil {
+		return eth.BlockID{}, eth.BlockID{}, fmt.Errorf("getting rollup client: %w", err)
+	}
+	syncStatus, err := rollupClient.SyncStatus(ctx)
 	// Ensure that we have the sync status
 	if err != nil {
 		return eth.BlockID{}, eth.BlockID{}, fmt.Errorf("failed to get sync status: %w", err)
@@ -272,7 +280,11 @@ func (l *BatchSubmitter) loop() {
 			if err := l.loadBlocksIntoState(l.shutdownCtx); errors.Is(err, ErrReorg) {
 				err := l.state.Close()
 				if err != nil {
-					l.Log.Error("error closing the channel manager to handle a L2 reorg", "err", err)
+					if errors.Is(err, ErrPendingAfterClose) {
+						l.Log.Warn("Closed channel manager to handle L2 reorg with pending channel(s) remaining - submitting")
+					} else {
+						l.Log.Error("Error closing the channel manager to handle a L2 reorg", "err", err)
+					}
 				}
 				l.publishStateToL1(queue, receiptsCh, true)
 				l.state.Clear()
@@ -282,11 +294,18 @@ func (l *BatchSubmitter) loop() {
 		case r := <-receiptsCh:
 			l.handleReceipt(r)
 		case <-l.shutdownCtx.Done():
+			// This removes any never-submitted pending channels, so these do not have to be drained with transactions.
+			// Any remaining unfinished channel is terminated, so its data gets submitted.
 			err := l.state.Close()
 			if err != nil {
-				l.Log.Error("error closing the channel manager", "err", err)
+				if errors.Is(err, ErrPendingAfterClose) {
+					l.Log.Warn("Closed channel manager on shutdown with pending channel(s) remaining - submitting")
+				} else {
+					l.Log.Error("Error closing the channel manager on shutdown", "err", err)
+				}
 			}
 			l.publishStateToL1(queue, receiptsCh, true)
+			l.Log.Info("Finished publishing all remaining channel data")
 			return
 		}
 	}
@@ -357,9 +376,10 @@ func (l *BatchSubmitter) sendTransaction(txdata txData, queue *txmgr.Queue[txDat
 	// Do the gas estimation offline. A value of 0 will cause the [txmgr] to estimate the gas limit.
 	data := txdata.Bytes()
 
-	l.Log.Info("celestia: submitting blob to celestia")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Duration(l.RollupConfig.BlockTime)*time.Second)
+	record := l.DAClient.Metrics.RecordDAClientRequest("da_blob_submit")
 	ids, _, err := l.DAClient.Client.Submit(ctx, [][]byte{data}, -1)
+	record(err)
 	cancel()
 	if err == nil && len(ids) == 1 {
 		l.Log.Info("celestia: blob successfully submitted", "id", hex.EncodeToString(ids[0]))

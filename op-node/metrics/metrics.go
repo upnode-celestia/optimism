@@ -36,6 +36,8 @@ type Metricer interface {
 	RecordRPCServerRequest(method string) func()
 	RecordRPCClientRequest(method string) func(err error)
 	RecordRPCClientResponse(method string, err error)
+	RecordDAClientRequest(method string) func(err error)
+	RecordDAClientResponse(method string, err error)
 	SetDerivationIdle(status bool)
 	RecordPipelineReset()
 	RecordSequencingError()
@@ -235,7 +237,7 @@ func NewMetrics(procName string) *Metrics {
 		PeerScores: factory.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: ns,
 			Name:      "peer_scores",
-			Help:      "Histogram of currrently connected peer scores",
+			Help:      "Histogram of currently connected peer scores",
 			Buckets:   []float64{-100, -40, -20, -10, -5, -2, -1, -0.5, -0.05, 0, 0.05, 0.5, 1, 2, 5, 10, 20, 40},
 		}, []string{"type"}),
 		StreamCount: factory.NewGauge(prometheus.GaugeOpts{

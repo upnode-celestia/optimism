@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum-optimism/optimism/op-service/dial"
 	ds "github.com/ipfs/go-datastore"
 	dsSync "github.com/ipfs/go-datastore/sync"
 	ic "github.com/libp2p/go-libp2p/core/crypto"
@@ -278,10 +279,46 @@ type System struct {
 
 	t      *testing.T
 	closed atomic.Bool
+
+	// rollupClients caches the lazily created RollupClient instances so they can be reused and closed
+	rollupClients map[string]*sources.RollupClient
 }
 
 func (sys *System) NodeEndpoint(name string) string {
 	return selectEndpoint(sys.EthInstances[name])
+}
+
+func (sys *System) NodeClient(name string) *ethclient.Client {
+	return sys.Clients[name]
+}
+
+func (sys *System) RollupEndpoint(name string) string {
+	return sys.RollupNodes[name].HTTPEndpoint()
+}
+
+func (sys *System) RollupClient(name string) *sources.RollupClient {
+	client, ok := sys.rollupClients[name]
+	if ok {
+		return client
+	}
+	logger := testlog.Logger(sys.t, log.LvlInfo).New("rollupClient", name)
+	endpoint := sys.RollupEndpoint(name)
+	client, err := dial.DialRollupClientWithTimeout(context.Background(), 30*time.Second, logger, endpoint)
+	require.NoErrorf(sys.t, err, "Failed to dial rollup client %v", name)
+	sys.rollupClients[name] = client
+	return client
+}
+
+func (sys *System) L1Deployments() *genesis.L1Deployments {
+	return sys.Cfg.L1Deployments
+}
+
+func (sys *System) RollupCfg() *rollup.Config {
+	return sys.RollupConfig
+}
+
+func (sys *System) L2Genesis() *core.Genesis {
+	return sys.L2GenesisCfg
 }
 
 func (sys *System) Close() {
@@ -313,6 +350,9 @@ func (sys *System) Close() {
 		if err := ei.Close(); err != nil && !errors.Is(err, node.ErrNodeStopped) {
 			combinedErr = errors.Join(combinedErr, fmt.Errorf("stop EthInstance %v: %w", name, err))
 		}
+	}
+	for _, client := range sys.rollupClients {
+		client.Close()
 	}
 	if sys.Mocknet != nil {
 		if err := sys.Mocknet.Close(); err != nil {
@@ -360,12 +400,13 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 	}
 
 	sys := &System{
-		Cfg:          cfg,
-		EthInstances: make(map[string]EthInstance),
-		Clients:      make(map[string]*ethclient.Client),
-		RawClients:   make(map[string]*rpc.Client),
-		RollupNodes:  make(map[string]*rollupNode.OpNode),
-		t:            t,
+		t:             t,
+		Cfg:           cfg,
+		EthInstances:  make(map[string]EthInstance),
+		Clients:       make(map[string]*ethclient.Client),
+		RawClients:    make(map[string]*rpc.Client),
+		RollupNodes:   make(map[string]*rollupNode.OpNode),
+		rollupClients: make(map[string]*sources.RollupClient),
 	}
 	// Automatically stop the system at the end of the test
 	t.Cleanup(sys.Close)
@@ -449,7 +490,7 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 			RegolithTime:            cfg.DeployConfig.RegolithTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
 			CanyonTime:              cfg.DeployConfig.CanyonTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
 			DeltaTime:               cfg.DeployConfig.DeltaTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
-			EclipseTime:             cfg.DeployConfig.EclipseTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
+			EcotoneTime:             cfg.DeployConfig.EcotoneTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
 			FjordTime:               cfg.DeployConfig.FjordTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
 			InteropTime:             cfg.DeployConfig.InteropTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
 			ProtocolVersionsAddress: cfg.L1Deployments.ProtocolVersionsProxy,
@@ -522,11 +563,6 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 	for name, rollupCfg := range cfg.Nodes {
 		configureL1(rollupCfg, sys.EthInstances["l1"])
 		configureL2(rollupCfg, sys.EthInstances[name], cfg.JWTSecret)
-
-		rollupCfg.L2Sync = &rollupNode.PreparedL2SyncEndpoint{
-			Client:   nil,
-			TrustRPC: false,
-		}
 	}
 
 	// Geth Clients

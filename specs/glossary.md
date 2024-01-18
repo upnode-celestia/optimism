@@ -195,7 +195,7 @@ pre-confirm the transactions before the L1 confirms the data.
 
 A sequencer is either a [rollup node][rollup-node] ran in sequencer mode, or the operator of this rollup node.
 
-The sequencer is a priviledged actor, which receives L2 transactions from L2 users, creates L2 blocks using them, which
+The sequencer is a privileged actor, which receives L2 transactions from L2 users, creates L2 blocks using them, which
 it then submits to [data availability provider][avail-provider] (via a [batcher]). It also submits [output
 roots][l2-output] to L1.
 
@@ -455,7 +455,7 @@ batcher transaction.
 
 [batcher]: glossary.md#batcher
 
-A batcher is a software component (independant program) that is responsible to make channels available on a data
+A batcher is a software component (independent program) that is responsible to make channels available on a data
 availability provider. The batcher communicates with the rollup node in order to retrieve the channels. The channels are
 then made available using [batcher transactions][batcher-transaction].
 
@@ -483,7 +483,7 @@ The channel timeout is a duration (in L1 blocks) during which [channel frames][c
 
 The acceptable time range for the frames of a [channel][channel] is `[channel_id.timestamp, channel_id.timestamp +
 CHANNEL_TIMEOUT]`. The acceptable L1 block range for these frames are any L1 block whose timestamp falls inside this
-time range. (Note that `channel_id.timetamp` must be lower than the L1 block timestamp of any L1 block in which frames
+time range. (Note that `channel_id.timestamp` must be lower than the L1 block timestamp of any L1 block in which frames
 of the channel are seen, or else these frames are ignored.)
 
 The purpose of channel timeouts is dual:
@@ -492,7 +492,7 @@ The purpose of channel timeouts is dual:
   sent).
 - Bound the number of L1 blocks we have to look back in order to decode [sequencer batches][sequencer-batch] from
   channels. This is particularly relevant during L1 re-orgs, see the [Resetting Channel Buffering][reset-channel-buffer]
-  section of the L2 Chain Derivation specifiction for more information.
+  section of the L2 Chain Derivation specification for more information.
 
 [reset-channel-buffer]: derivation.md#resetting-channel-buffering
 
@@ -511,7 +511,7 @@ See the [L2 chain derivation specification][derivation-spec] for more details.
 
 ## L2 Derivation Inputs
 
-[deriv-inputs]: glossary.md#l2-chain-derivation-inputs
+[deriv-inputs]: glossary.md#l2-derivation-inputs
 
 This term refers to data that is found in L1 blocks and is read by the [rollup node][rollup-node] to construct [payload
 attributes][payload-attr].
@@ -564,7 +564,7 @@ The state of the L2 genesis block comprises:
     how native ETH balances were stored in the storage trie.
 - [Predeployed contracts][predeploy]
 
-The timestap of the L2 genesis block must be a multiple of the [block time][block-time] (i.e. a even number, since the
+The timestamp of the L2 genesis block must be a multiple of the [block time][block-time] (i.e. a even number, since the
 block time is 2 seconds).
 
 When updating the rollup protocol to a new version, we may perform a *squash fork*, a process that entails the creation
@@ -618,7 +618,7 @@ The unsafe L2 head is the highest [unsafe L2 block][unsafe-l2-block] that a [rol
 [consolidation]: glossary.md#unsafe-block-consolidation
 
 Unsafe block consolidation is the process through which the [rollup node][rollup-node] attempts to move the [safe L2
-head] a block forward, so that the oldest [unsafe L2 block][unsafe-l2-block] becomes the new safe L2 head.
+head][safe-l2-head] a block forward, so that the oldest [unsafe L2 block][unsafe-l2-block] becomes the new safe L2 head.
 
 In order to perform consolidation, the node verifies that the [payload attributes][payload-attr] derived from the L1
 chain match the oldest unsafe L2 block exactly.
@@ -634,7 +634,7 @@ See the [Engine Queue section][engine-queue] of the L2 chain derivatiaon spec fo
 The finalized L2 head is the highest L2 block that can be derived from *[finalized][finality]* L1 blocks — i.e. L1
 blocks older than two L1 epochs (64 L1 [time slots][time-slot]).
 
-[finality]: <https://hackmd.io/@prysmaticlabs/finality> *finalized* L1 data.
+[finality]: https://hackmd.io/@prysmaticlabs/finality
 
 ------------------------------------------------------------------------------------------------------------------------
 
@@ -705,8 +705,6 @@ cf. [Proposing L2 output commitments](proposals.md#l2-output-root-proposals-spec
 
 An L1 contract to which [L2 output roots][l2-output] are posted by the [sequencer].
 
-> **TODO** expand
-
 ## Validator
 
 [validator]: glossary.md#validator
@@ -727,10 +725,7 @@ proof][fault-proof].
 An on-chain *interactive* proof, performed by [validators][validator], that demonstrates that a [sequencer] provided
 erroneous [output roots][l2-output].
 
-Fault proofs are not specified yet. For now, the best place to find information about fault proofs is the [Cannon
-repository][cannon].
-
-> **TODO** expand
+cf. [Fault Proofs](./fault-proof.md)
 
 ## Time Slot
 
@@ -749,7 +744,7 @@ of even benign consensus issues.
 
 The L2 block time is 2 second, meaning there is an L2 block at every 2s [time slot][time-slot].
 
-Post-[merge], it could be said the that L1 block time is 12s as that is the L1 [time slot][time-slot]. However, in
+Post-[merge], it could be said that the L1 block time is 12s as that is the L1 [time slot][time-slot]. However, in
 reality the block time is variable as some time slots might be skipped.
 
 Pre-merge, the L1 block time is variable, though it is on average 13s.

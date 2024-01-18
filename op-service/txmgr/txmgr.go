@@ -587,9 +587,9 @@ func (m *SimpleTxManager) suggestGasPriceCaps(ctx context.Context) (*big.Int, *b
 
 func (m *SimpleTxManager) checkLimits(tip, basefee, bumpedTip, bumpedFee *big.Int) error {
 	// If below threshold, don't apply multiplier limit
-	// if thr := m.cfg.FeeLimitThreshold; thr != nil && thr.Cmp(bumpedFee) == 1 {
-	// 	return nil
-	// }
+	if thr := m.cfg.FeeLimitThreshold; thr != nil && thr.Cmp(bumpedFee) == 1 {
+		return nil
+	}
 
 	// Make sure increase is at most [FeeLimitMultiplier] the suggested values
 	feeLimitMult := big.NewInt(int64(m.cfg.FeeLimitMultiplier))
