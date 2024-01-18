@@ -36,6 +36,8 @@ type Metricer interface {
 	RecordRPCServerRequest(method string) func()
 	RecordRPCClientRequest(method string) func(err error)
 	RecordRPCClientResponse(method string, err error)
+	RecordDAClientRequest(method string) func(err error)
+	RecordDAClientResponse(method string, err error)
 	SetDerivationIdle(status bool)
 	RecordPipelineReset()
 	RecordSequencingError()
