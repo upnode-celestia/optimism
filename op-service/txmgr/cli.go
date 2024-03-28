@@ -4,17 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
 	"time"
 
 	opservice "github.com/ethereum-optimism/optimism/op-service"
 	opcrypto "github.com/ethereum-optimism/optimism/op-service/crypto"
+	"github.com/ethereum-optimism/optimism/op-service/eth"
 	opsigner "github.com/ethereum-optimism/optimism/op-service/signer"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/params"
 	"github.com/urfave/cli/v2"
 )
 
@@ -30,6 +29,8 @@ const (
 	SafeAbortNonceTooLowCountFlagName = "safe-abort-nonce-too-low-count"
 	FeeLimitMultiplierFlagName        = "fee-limit-multiplier"
 	FeeLimitThresholdFlagName         = "txmgr.fee-limit-threshold"
+	MinBaseFeeFlagName                = "txmgr.min-basefee"
+	MinTipCapFlagName                 = "txmgr.min-tip-cap"
 	ResubmissionTimeoutFlagName       = "resubmission-timeout"
 	NetworkTimeoutFlagName            = "network-timeout"
 	TxSendTimeoutFlagName             = "txmgr.send-timeout"
@@ -57,6 +58,8 @@ type DefaultFlagValues struct {
 	SafeAbortNonceTooLowCount uint64
 	FeeLimitMultiplier        uint64
 	FeeLimitThresholdGwei     float64
+	MinTipCapGwei             float64
+	MinBaseFeeGwei            float64
 	ResubmissionTimeout       time.Duration
 	NetworkTimeout            time.Duration
 	TxSendTimeout             time.Duration
@@ -70,6 +73,8 @@ var (
 		SafeAbortNonceTooLowCount: uint64(3),
 		FeeLimitMultiplier:        uint64(5),
 		FeeLimitThresholdGwei:     100.0,
+		MinTipCapGwei:             1.0,
+		MinBaseFeeGwei:            1.0,
 		ResubmissionTimeout:       48 * time.Second,
 		NetworkTimeout:            10 * time.Second,
 		TxSendTimeout:             0 * time.Second,
@@ -81,6 +86,8 @@ var (
 		SafeAbortNonceTooLowCount: uint64(3),
 		FeeLimitMultiplier:        uint64(5),
 		FeeLimitThresholdGwei:     100.0,
+		MinTipCapGwei:             1.0,
+		MinBaseFeeGwei:            1.0,
 		ResubmissionTimeout:       24 * time.Second,
 		NetworkTimeout:            10 * time.Second,
 		TxSendTimeout:             2 * time.Minute,
@@ -137,6 +144,18 @@ func CLIFlagsWithDefaults(envPrefix string, defaults DefaultFlagValues) []cli.Fl
 			Value:   defaults.FeeLimitThresholdGwei,
 			EnvVars: prefixEnvVars("TXMGR_FEE_LIMIT_THRESHOLD"),
 		},
+		&cli.Float64Flag{
+			Name:    MinTipCapFlagName,
+			Usage:   "Enforces a minimum tip cap (in GWei) to use when determining tx fees. 1 GWei by default.",
+			Value:   defaults.MinTipCapGwei,
+			EnvVars: prefixEnvVars("TXMGR_MIN_TIP_CAP"),
+		},
+		&cli.Float64Flag{
+			Name:    MinBaseFeeFlagName,
+			Usage:   "Enforces a minimum base fee (in GWei) to assume when determining tx fees. 1 GWei by default.",
+			Value:   defaults.MinBaseFeeGwei,
+			EnvVars: prefixEnvVars("TXMGR_MIN_BASEFEE"),
+		},
 		&cli.DurationFlag{
 			Name:    ResubmissionTimeoutFlagName,
 			Usage:   "Duration we will wait before resubmitting a transaction to L1",
@@ -182,6 +201,8 @@ type CLIConfig struct {
 	SafeAbortNonceTooLowCount uint64
 	FeeLimitMultiplier        uint64
 	FeeLimitThresholdGwei     float64
+	MinBaseFeeGwei            float64
+	MinTipCapGwei             float64
 	ResubmissionTimeout       time.Duration
 	ReceiptQueryInterval      time.Duration
 	NetworkTimeout            time.Duration
@@ -196,6 +217,8 @@ func NewCLIConfig(l1RPCURL string, defaults DefaultFlagValues) CLIConfig {
 		SafeAbortNonceTooLowCount: defaults.SafeAbortNonceTooLowCount,
 		FeeLimitMultiplier:        defaults.FeeLimitMultiplier,
 		FeeLimitThresholdGwei:     defaults.FeeLimitThresholdGwei,
+		MinTipCapGwei:             defaults.MinTipCapGwei,
+		MinBaseFeeGwei:            defaults.MinBaseFeeGwei,
 		ResubmissionTimeout:       defaults.ResubmissionTimeout,
 		NetworkTimeout:            defaults.NetworkTimeout,
 		TxSendTimeout:             defaults.TxSendTimeout,
@@ -217,6 +240,10 @@ func (m CLIConfig) Check() error {
 	}
 	if m.FeeLimitMultiplier == 0 {
 		return errors.New("must provide FeeLimitMultiplier")
+	}
+	if m.MinBaseFeeGwei < m.MinTipCapGwei {
+		return fmt.Errorf("minBaseFee smaller than minTipCap, have %f < %f",
+			m.MinBaseFeeGwei, m.MinTipCapGwei)
 	}
 	if m.ResubmissionTimeout == 0 {
 		return errors.New("must provide ResubmissionTimeout")
@@ -249,6 +276,8 @@ func ReadCLIConfig(ctx *cli.Context) CLIConfig {
 		SafeAbortNonceTooLowCount: ctx.Uint64(SafeAbortNonceTooLowCountFlagName),
 		FeeLimitMultiplier:        ctx.Uint64(FeeLimitMultiplierFlagName),
 		FeeLimitThresholdGwei:     ctx.Float64(FeeLimitThresholdFlagName),
+		MinBaseFeeGwei:            ctx.Float64(MinBaseFeeFlagName),
+		MinTipCapGwei:             ctx.Float64(MinTipCapFlagName),
 		ResubmissionTimeout:       ctx.Duration(ResubmissionTimeoutFlagName),
 		ReceiptQueryInterval:      ctx.Duration(ReceiptQueryIntervalFlagName),
 		NetworkTimeout:            ctx.Duration(NetworkTimeoutFlagName),
@@ -289,21 +318,28 @@ func NewConfig(cfg CLIConfig, l log.Logger) (Config, error) {
 		return Config{}, fmt.Errorf("could not init signer: %w", err)
 	}
 
-	if thr := cfg.FeeLimitThresholdGwei; math.IsNaN(thr) || math.IsInf(thr, 0) {
-		return Config{}, fmt.Errorf("invalid fee limit threshold: %v", thr)
+	feeLimitThreshold, err := eth.GweiToWei(cfg.FeeLimitThresholdGwei)
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid fee limit threshold: %w", err)
 	}
 
-	// convert float GWei value into integer Wei value
-	feeLimitThreshold, _ := new(big.Float).Mul(
-		big.NewFloat(cfg.FeeLimitThresholdGwei),
-		big.NewFloat(params.GWei)).
-		Int(nil)
+	minBaseFee, err := eth.GweiToWei(cfg.MinBaseFeeGwei)
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid min base fee: %w", err)
+	}
+
+	minTipCap, err := eth.GweiToWei(cfg.MinTipCapGwei)
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid min tip cap: %w", err)
+	}
 
 	return Config{
 		Backend:                   l1,
 		ResubmissionTimeout:       cfg.ResubmissionTimeout,
 		FeeLimitMultiplier:        cfg.FeeLimitMultiplier,
 		FeeLimitThreshold:         feeLimitThreshold,
+		MinBaseFee:                minBaseFee,
+		MinTipCap:                 minTipCap,
 		ChainID:                   chainID,
 		TxSendTimeout:             cfg.TxSendTimeout,
 		TxNotInMempoolTimeout:     cfg.TxNotInMempoolTimeout,
@@ -332,6 +368,12 @@ type Config struct {
 	// On low-fee networks, like test networks, this allows for arbitrary fee bumps
 	// below this threshold.
 	FeeLimitThreshold *big.Int
+
+	// Minimum base fee (in Wei) to assume when determining tx fees.
+	MinBaseFee *big.Int
+
+	// Minimum tip cap (in Wei) to enforce when determining tx fees.
+	MinTipCap *big.Int
 
 	// ChainID is the chain ID of the L1 chain.
 	ChainID *big.Int
@@ -379,6 +421,10 @@ func (m Config) Check() error {
 	}
 	if m.FeeLimitMultiplier == 0 {
 		return errors.New("must provide FeeLimitMultiplier")
+	}
+	if m.MinBaseFee != nil && m.MinTipCap != nil && m.MinBaseFee.Cmp(m.MinTipCap) == -1 {
+		return fmt.Errorf("minBaseFee smaller than minTipCap, have %v < %v",
+			m.MinBaseFee, m.MinTipCap)
 	}
 	if m.ResubmissionTimeout == 0 {
 		return errors.New("must provide ResubmissionTimeout")

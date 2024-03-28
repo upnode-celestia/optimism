@@ -17,16 +17,13 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 
 	"github.com/ethereum-optimism/optimism/op-bindings/bindings"
-	"github.com/ethereum-optimism/optimism/op-chain-ops/srcmap"
 )
 
 // LoadContracts loads the Cannon contracts, from op-bindings package
 func LoadContracts() (*Contracts, error) {
 	var mips, oracle Contract
 	mips.DeployedBytecode.Object = hexutil.MustDecode(bindings.MIPSDeployedBin)
-	mips.DeployedBytecode.SourceMap = bindings.MIPSDeployedSourceMap
 	oracle.DeployedBytecode.Object = hexutil.MustDecode(bindings.PreimageOracleDeployedBin)
-	oracle.DeployedBytecode.SourceMap = bindings.PreimageOracleDeployedSourceMap
 	return &Contracts{
 		MIPS:   &mips,
 		Oracle: &oracle,
@@ -42,10 +39,6 @@ type Contract struct {
 	// ignore abi,bytecode,etc.
 }
 
-func (c *Contract) SourceMap(sourcePaths []string) (*srcmap.SourceMap, error) {
-	return srcmap.ParseSourceMap(sourcePaths, c.DeployedBytecode.Object, c.DeployedBytecode.SourceMap)
-}
-
 type Contracts struct {
 	MIPS   *Contract
 	Oracle *Contract
@@ -59,9 +52,14 @@ type Addresses struct {
 }
 
 func NewEVMEnv(contracts *Contracts, addrs *Addresses) (*vm.EVM, *state.StateDB) {
-	chainCfg := params.MainnetChainConfig
-	offsetBlocks := uint64(1000) // blocks after shanghai fork
-	bc := &testChain{startTime: *chainCfg.ShanghaiTime + offsetBlocks*12}
+	// Temporary hack until Cancun is activated on mainnet
+	cpy := *params.MainnetChainConfig
+	chainCfg := &cpy // don't modify the global chain config
+	// Activate Cancun for EIP-4844 KZG point evaluation precompile
+	cancunActivation := *chainCfg.ShanghaiTime + 10
+	chainCfg.CancunTime = &cancunActivation
+	offsetBlocks := uint64(1000) // blocks after cancun fork
+	bc := &testChain{startTime: *chainCfg.CancunTime + offsetBlocks*12}
 	header := bc.GetHeader(common.Hash{}, 17034870+offsetBlocks)
 	db := rawdb.NewMemoryDatabase()
 	statedb := state.NewDatabase(db)

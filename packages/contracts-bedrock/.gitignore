@@ -3,8 +3,9 @@ artifacts
 forge-artifacts
 cache
 broadcast
-kout
-test/kontrol/kontrol/logs
+kout-deployment
+kout-proofs
+test/kontrol/logs
 
 # Metrics
 coverage.out
@@ -12,6 +13,7 @@ coverage.out
 
 # Testing State
 .testdata
+kontrol_prove_report.xml
 
 # Scripts
 scripts/go-ffi/go-ffi

@@ -21,11 +21,13 @@ build-ts: submodules
 		. $$NVM_DIR/nvm.sh && nvm use; \
 	fi
 	pnpm install:ci
+	pnpm prepare
 	pnpm build
 .PHONY: build-ts
 
 ci-builder:
 	docker build -t ci-builder -f ops/docker/ci-builder/Dockerfile .
+.PHONY: ci-builder
 
 golang-docker:
 	# We don't use a buildx builder here, and just load directly into regular docker, for convenience.
@@ -80,6 +82,10 @@ op-challenger:
 	make -C ./op-challenger op-challenger
 .PHONY: op-challenger
 
+op-dispute-mon:
+	make -C ./op-dispute-mon op-dispute-mon
+.PHONY: op-dispute-mon
+
 op-program:
 	make -C ./op-program op-program
 .PHONY: op-program
@@ -88,10 +94,15 @@ cannon:
 	make -C ./cannon cannon
 .PHONY: cannon
 
+reproducible-prestate:
+	make -C ./op-program reproducible-prestate
+.PHONY: reproducible-prestate
+
 cannon-prestate: op-program cannon
 	./cannon/bin/cannon load-elf --path op-program/bin/op-program-client.elf --out op-program/bin/prestate.json --meta op-program/bin/meta.json
 	./cannon/bin/cannon run --proof-at '=0' --stop-at '=1' --input op-program/bin/prestate.json --meta op-program/bin/meta.json --proof-fmt 'op-program/bin/%d.json' --output ""
 	mv op-program/bin/0.json op-program/bin/prestate-proof.json
+.PHONY: cannon-prestate
 
 mod-tidy:
 	# Below GOPRIVATE line allows mod-tidy to be run immediately after
@@ -100,6 +111,7 @@ mod-tidy:
 	#
 	# See https://proxy.golang.org/ for more info.
 	export GOPRIVATE="github.com/ethereum-optimism" && go mod tidy
+	make -C ./op-ufm mod-tidy
 .PHONY: mod-tidy
 
 clean:
@@ -125,9 +137,6 @@ devnet-up: pre-devnet
 	PYTHONPATH=./bedrock-devnet $(PYTHON) ./bedrock-devnet/main.py --monorepo-dir=.
 .PHONY: devnet-up
 
-# alias for devnet-up
-devnet-up-deploy: devnet-up
-
 devnet-test: pre-devnet
 	PYTHONPATH=./bedrock-devnet $(PYTHON) ./bedrock-devnet/main.py --monorepo-dir=. --test
 .PHONY: devnet-test
@@ -146,10 +155,11 @@ devnet-clean:
 
 devnet-allocs: pre-devnet
 	PYTHONPATH=./bedrock-devnet $(PYTHON) ./bedrock-devnet/main.py --monorepo-dir=. --allocs
+.PHONY: devnet-allocs
 
 devnet-logs:
 	@(cd ./ops-bedrock && docker compose logs -f)
-	.PHONY: devnet-logs
+.PHONY: devnet-logs
 
 test-unit:
 	make -C ./op-node test
@@ -173,6 +183,7 @@ semgrep:
 clean-node-modules:
 	rm -rf node_modules
 	rm -rf packages/**/node_modules
+.PHONY: clean-node-modules
 
 tag-bedrock-go-modules:
 	./ops/scripts/tag-bedrock-go-modules.sh $(BEDROCK_TAGS_REMOTE) $(VERSION)
@@ -186,11 +197,12 @@ bedrock-markdown-links:
 	docker run --init -it -v `pwd`:/input lycheeverse/lychee --verbose --no-progress --exclude-loopback \
 		--exclude twitter.com --exclude explorer.optimism.io --exclude linux-mips.org --exclude vitalik.ca \
 		--exclude-mail /input/README.md "/input/specs/**/*.md"
+.PHONY: bedrock-markdown-links
 
 install-geth:
 	./ops/scripts/geth-version-checker.sh && \
 	 	(echo "Geth versions match, not installing geth..."; true) || \
  		(echo "Versions do not match, installing geth!"; \
- 			go install -v github.com/ethereum/go-ethereum/cmd/geth@$(shell cat .gethrc); \
+ 			go install -v github.com/ethereum/go-ethereum/cmd/geth@$(shell jq -r .geth < versions.json); \
  			echo "Installed geth!"; true)
 .PHONY: install-geth

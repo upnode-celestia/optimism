@@ -2,17 +2,17 @@ package solver
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/ethereum-optimism/optimism/op-challenger/game/fault/types"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 type GameSolver struct {
 	claimSolver *claimSolver
 }
 
-func NewGameSolver(gameDepth int, trace types.TraceAccessor) *GameSolver {
+func NewGameSolver(gameDepth types.Depth, trace types.TraceAccessor) *GameSolver {
 	return &GameSolver{
 		claimSolver: newClaimSolver(gameDepth, trace),
 	}
@@ -27,67 +27,71 @@ func (s *GameSolver) CalculateNextActions(ctx context.Context, game types.Game) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine if root claim is correct: %w", err)
 	}
-	var errs []error
 	var actions []types.Action
+	agreedClaims := newHonestClaimTracker()
+	if agreeWithRootClaim {
+		agreedClaims.AddHonestClaim(types.Claim{}, game.Claims()[0])
+	}
 	for _, claim := range game.Claims() {
 		var action *types.Action
-		var err error
-		if uint64(claim.Depth()) == game.MaxDepth() {
-			action, err = s.calculateStep(ctx, game, agreeWithRootClaim, claim)
+		if claim.Depth() == game.MaxDepth() {
+			action, err = s.calculateStep(ctx, game, claim, agreedClaims)
 		} else {
-			action, err = s.calculateMove(ctx, game, agreeWithRootClaim, claim)
+			action, err = s.calculateMove(ctx, game, claim, agreedClaims)
 		}
 		if err != nil {
-			errs = append(errs, err)
-			continue
+			// Unable to continue iterating claims safely because we may not have tracked the required honest moves
+			// for this claim which affects the response to later claims.
+			// Any actions we've already identified are still safe to apply.
+			return actions, fmt.Errorf("failed to determine response to claim %v: %w", claim.ContractIndex, err)
 		}
 		if action == nil {
 			continue
 		}
 		actions = append(actions, *action)
 	}
-	return actions, errors.Join(errs...)
+	return actions, nil
 }
 
-func (s *GameSolver) calculateStep(ctx context.Context, game types.Game, agreeWithRootClaim bool, claim types.Claim) (*types.Action, error) {
-	if claim.Countered {
+func (s *GameSolver) calculateStep(ctx context.Context, game types.Game, claim types.Claim, agreedClaims *honestClaimTracker) (*types.Action, error) {
+	if claim.CounteredBy != (common.Address{}) {
 		return nil, nil
 	}
-	if game.AgreeWithClaimLevel(claim, agreeWithRootClaim) {
-		return nil, nil
-	}
-	step, err := s.claimSolver.AttemptStep(ctx, game, claim)
-	if errors.Is(err, ErrStepIgnoreInvalidPath) {
-		return nil, nil
-	}
+	step, err := s.claimSolver.AttemptStep(ctx, game, claim, agreedClaims)
 	if err != nil {
 		return nil, err
 	}
+	if step == nil {
+		return nil, nil
+	}
 	return &types.Action{
-		Type:       types.ActionTypeStep,
-		ParentIdx:  step.LeafClaim.ContractIndex,
-		IsAttack:   step.IsAttack,
-		PreState:   step.PreState,
-		ProofData:  step.ProofData,
-		OracleData: step.OracleData,
+		Type:           types.ActionTypeStep,
+		ParentIdx:      step.LeafClaim.ContractIndex,
+		ParentPosition: step.LeafClaim.Position,
+		IsAttack:       step.IsAttack,
+		PreState:       step.PreState,
+		ProofData:      step.ProofData,
+		OracleData:     step.OracleData,
 	}, nil
 }
 
-func (s *GameSolver) calculateMove(ctx context.Context, game types.Game, agreeWithRootClaim bool, claim types.Claim) (*types.Action, error) {
-	if game.AgreeWithClaimLevel(claim, agreeWithRootClaim) {
-		return nil, nil
-	}
-	move, err := s.claimSolver.NextMove(ctx, claim, game)
+func (s *GameSolver) calculateMove(ctx context.Context, game types.Game, claim types.Claim, honestClaims *honestClaimTracker) (*types.Action, error) {
+	move, err := s.claimSolver.NextMove(ctx, claim, game, honestClaims)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate next move for claim index %v: %w", claim.ContractIndex, err)
 	}
-	if move == nil || game.IsDuplicate(*move) {
+	if move == nil {
+		return nil, nil
+	}
+	honestClaims.AddHonestClaim(claim, *move)
+	if game.IsDuplicate(*move) {
 		return nil, nil
 	}
 	return &types.Action{
-		Type:      types.ActionTypeMove,
-		IsAttack:  !game.DefendsParent(*move),
-		ParentIdx: move.ParentContractIndex,
-		Value:     move.Value,
+		Type:           types.ActionTypeMove,
+		IsAttack:       !game.DefendsParent(*move),
+		ParentIdx:      move.ParentContractIndex,
+		ParentPosition: claim.Position,
+		Value:          move.Value,
 	}, nil
 }

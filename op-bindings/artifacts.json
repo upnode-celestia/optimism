@@ -19,7 +19,6 @@
     "L1FeeVault",
     "OptimismMintableERC20Factory",
     "OptimismMintableERC20",
-    "LegacyERC20ETH",
     "Proxy",
     "ProxyAdmin",
     "LegacyMessagePasser",
@@ -27,16 +26,14 @@
     "WETH9",
     "DeployerWhitelist",
     "L1BlockNumber",
+    "DelayedWETH",
     "DisputeGameFactory",
     "FaultDisputeGame",
-    "OutputBisectionGame",
     "AlphabetVM",
-    "AlphabetVM2",
     "StandardBridge",
     "CrossDomainMessenger",
     "MIPS",
     "PreimageOracle",
-    "BlockOracle",
     "EAS",
     "SchemaRegistry",
     "ProtocolVersions",
@@ -45,7 +42,8 @@
     "DelayedVetoable",
     "ISemver",
     "StorageSetter",
-    "SuperchainConfig"
+    "SuperchainConfig",
+    "DataAvailabilityChallenge"
   ],
   "remote": [
     {

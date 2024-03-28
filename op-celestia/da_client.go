@@ -1,29 +1,31 @@
 package celestia
 
 import (
+	"encoding/hex"
 	"time"
 
-	"github.com/ethereum-optimism/optimism/op-service/metrics"
+	"github.com/rollkit/go-da"
 	"github.com/rollkit/go-da/proxy"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 type DAClient struct {
-	Client     *proxy.Client
-	Metrics    metrics.RPCMetricer
+	Client     da.DA
 	GetTimeout time.Duration
+	Namespace da.Namespace
 }
 
-func NewDAClient(rpc string, m metrics.RPCMetricer) (*DAClient, error) {
-	client := proxy.NewClient()
-	err := client.Start(rpc, grpc.WithTransportCredentials(insecure.NewCredentials()))
+func NewDAClient(rpc, token, namespace string) (*DAClient, error) {
+	client, err := proxy.NewClient(rpc, token)
+	if err != nil {
+		return nil, err
+	}
+	ns, err := hex.DecodeString(namespace)
 	if err != nil {
 		return nil, err
 	}
 	return &DAClient{
 		Client:     client,
-		Metrics:    m,
 		GetTimeout: time.Minute,
+		Namespace: ns,
 	}, nil
 }

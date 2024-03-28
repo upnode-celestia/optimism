@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethereum-optimism/optimism/op-service/dial"
+	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/batcher"
 	ds "github.com/ipfs/go-datastore"
 	dsSync "github.com/ipfs/go-datastore/sync"
 	ic "github.com/libp2p/go-libp2p/core/crypto"
@@ -39,8 +39,9 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 
 	bss "github.com/ethereum-optimism/optimism/op-batcher/batcher"
-	"github.com/ethereum-optimism/optimism/op-batcher/compressor"
+	batcherFlags "github.com/ethereum-optimism/optimism/op-batcher/flags"
 	"github.com/ethereum-optimism/optimism/op-bindings/predeploys"
+	celestia "github.com/ethereum-optimism/optimism/op-celestia"
 	"github.com/ethereum-optimism/optimism/op-chain-ops/genesis"
 	"github.com/ethereum-optimism/optimism/op-e2e/config"
 	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils"
@@ -57,7 +58,9 @@ import (
 	"github.com/ethereum-optimism/optimism/op-node/rollup/sync"
 	l2os "github.com/ethereum-optimism/optimism/op-proposer/proposer"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
+	"github.com/ethereum-optimism/optimism/op-service/client"
 	"github.com/ethereum-optimism/optimism/op-service/clock"
+	"github.com/ethereum-optimism/optimism/op-service/dial"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
 	"github.com/ethereum-optimism/optimism/op-service/sources"
@@ -65,9 +68,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-service/txmgr"
 )
 
-var (
-	testingJWTSecret = [32]byte{123}
-)
+var testingJWTSecret = [32]byte{123}
 
 func newTxMgrConfig(l1Addr string, privKey *ecdsa.PrivateKey) txmgr.CLIConfig {
 	return txmgr.CLIConfig{
@@ -90,10 +91,10 @@ func DefaultSystemConfig(t *testing.T) SystemConfig {
 	require.NoError(t, err)
 	deployConfig := config.DeployConfig.Copy()
 	deployConfig.L1GenesisBlockTimestamp = hexutil.Uint64(time.Now().Unix())
-	deployConfig.L2GenesisCanyonTimeOffset = e2eutils.CanyonTimeOffset()
+	e2eutils.ApplyDeployConfigForks(deployConfig)
 	require.NoError(t, deployConfig.Check(), "Deploy config is invalid, do you need to run make devnet-allocs?")
 	l1Deployments := config.L1Deployments.Copy()
-	require.NoError(t, l1Deployments.Check())
+	require.NoError(t, l1Deployments.Check(deployConfig))
 
 	require.Equal(t, secrets.Addresses().Batcher, deployConfig.BatchSenderAddress)
 	require.Equal(t, secrets.Addresses().SequencerP2P, deployConfig.P2PSequencerAddress)
@@ -131,6 +132,7 @@ func DefaultSystemConfig(t *testing.T) SystemConfig {
 				RuntimeConfigReloadInterval: time.Minute * 10,
 				ConfigPersistence:           &rollupNode.DisabledConfigPersistence{},
 				Sync:                        sync.Config{SyncMode: sync.CLSync},
+				DaConfig:                    celestia.CLIConfig{Rpc: "grpc://localhost:26650"},
 			},
 			"verifier": {
 				Driver: driver.Config{
@@ -142,19 +144,22 @@ func DefaultSystemConfig(t *testing.T) SystemConfig {
 				RuntimeConfigReloadInterval: time.Minute * 10,
 				ConfigPersistence:           &rollupNode.DisabledConfigPersistence{},
 				Sync:                        sync.Config{SyncMode: sync.CLSync},
+				DaConfig:                    celestia.CLIConfig{Rpc: "grpc://localhost:26650"},
 			},
 		},
 		Loggers: map[string]log.Logger{
-			"verifier":  testlog.Logger(t, log.LvlInfo).New("role", "verifier"),
-			"sequencer": testlog.Logger(t, log.LvlInfo).New("role", "sequencer"),
-			"batcher":   testlog.Logger(t, log.LvlInfo).New("role", "batcher"),
-			"proposer":  testlog.Logger(t, log.LvlCrit).New("role", "proposer"),
+			"verifier":  testlog.Logger(t, log.LevelInfo).New("role", "verifier"),
+			"sequencer": testlog.Logger(t, log.LevelInfo).New("role", "sequencer"),
+			"batcher":   testlog.Logger(t, log.LevelInfo).New("role", "batcher"),
+			"proposer":  testlog.Logger(t, log.LevelCrit).New("role", "proposer"),
 		},
-		GethOptions:                map[string][]geth.GethOption{},
-		P2PTopology:                nil, // no P2P connectivity by default
-		NonFinalizedProposals:      false,
-		ExternalL2Shim:             config.ExternalL2Shim,
-		BatcherTargetL1TxSizeBytes: 100_000,
+		GethOptions:            map[string][]geth.GethOption{},
+		P2PTopology:            nil, // no P2P connectivity by default
+		NonFinalizedProposals:  false,
+		ExternalL2Shim:         config.ExternalL2Shim,
+		DataAvailabilityType:   batcherFlags.CalldataType,
+		MaxPendingTransactions: 1,
+		BatcherTargetNumFrames: 1,
 	}
 }
 
@@ -207,14 +212,26 @@ type SystemConfig struct {
 	// Explicitly disable batcher, for tests that rely on unsafe L2 payloads
 	DisableBatcher bool
 
-	// Target L1 tx size for the batcher transactions
-	BatcherTargetL1TxSizeBytes uint64
+	// Configure data-availability type that is used by the batcher.
+	DataAvailabilityType batcherFlags.DataAvailabilityType
 
 	// Max L1 tx size for the batcher transactions
 	BatcherMaxL1TxSizeBytes uint64
 
+	// Target number of frames to create per channel. Can be used to create
+	// multi-blob transactions.
+	// Default is 1 if unset.
+	BatcherTargetNumFrames int
+
+	// whether to actually use BatcherMaxL1TxSizeBytes for blobs, insteaf of max blob size
+	BatcherUseMaxTxSizeForBlobs bool
+
 	// SupportL1TimeTravel determines if the L1 node supports quickly skipping forward in time
 	SupportL1TimeTravel bool
+
+	// MaxPendingTransactions determines how many transactions the batcher will try to send
+	// concurrently. 0 means unlimited.
+	MaxPendingTransactions uint64
 }
 
 type GethInstance struct {
@@ -284,6 +301,23 @@ type System struct {
 	rollupClients map[string]*sources.RollupClient
 }
 
+// AdvanceTime advances the system clock by the given duration.
+// If the [System.TimeTravelClock] is nil, this is a no-op.
+func (sys *System) AdvanceTime(d time.Duration) {
+	if sys.TimeTravelClock != nil {
+		sys.TimeTravelClock.AdvanceTime(d)
+	}
+}
+
+func (sys *System) L1BeaconEndpoint() string {
+	return sys.L1BeaconAPIAddr
+}
+
+func (sys *System) L1BeaconHTTPClient() *sources.BeaconHTTPClient {
+	logger := testlog.Logger(sys.t, log.LevelInfo).New("component", "beaconClient")
+	return sources.NewBeaconHTTPClient(client.NewBasicHTTPClient(sys.L1BeaconEndpoint(), logger))
+}
+
 func (sys *System) NodeEndpoint(name string) string {
 	return selectEndpoint(sys.EthInstances[name])
 }
@@ -301,7 +335,7 @@ func (sys *System) RollupClient(name string) *sources.RollupClient {
 	if ok {
 		return client
 	}
-	logger := testlog.Logger(sys.t, log.LvlInfo).New("rollupClient", name)
+	logger := testlog.Logger(sys.t, log.LevelInfo).New("rollupClient", name)
 	endpoint := sys.RollupEndpoint(name)
 	client, err := dial.DialRollupClientWithTimeout(context.Background(), 30*time.Second, logger, endpoint)
 	require.NoErrorf(sys.t, err, "Failed to dial rollup client %v", name)
@@ -319,6 +353,11 @@ func (sys *System) RollupCfg() *rollup.Config {
 
 func (sys *System) L2Genesis() *core.Genesis {
 	return sys.L2GenesisCfg
+}
+
+func (sys *System) L1Slot(l1Timestamp uint64) uint64 {
+	return (l1Timestamp - uint64(sys.Cfg.DeployConfig.L1GenesisBlockTimestamp)) /
+		sys.Cfg.DeployConfig.L1BlockTime
 }
 
 func (sys *System) Close() {
@@ -421,7 +460,7 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 		return nil, err
 	}
 
-	l1Genesis, err := genesis.BuildL1DeveloperGenesis(cfg.DeployConfig, config.L1Allocs, config.L1Deployments, true)
+	l1Genesis, err := genesis.BuildL1DeveloperGenesis(cfg.DeployConfig, config.L1Allocs, config.L1Deployments)
 	if err != nil {
 		return nil, err
 	}
@@ -503,7 +542,7 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 	sys.RollupConfig = &defaultConfig
 
 	// Create a fake Beacon node to hold on to blobs created by the L1 miner, and to serve them to L2
-	bcn := fakebeacon.NewBeacon(testlog.Logger(t, log.LvlInfo).New("role", "l1_cl"),
+	bcn := fakebeacon.NewBeacon(testlog.Logger(t, log.LevelInfo).New("role", "l1_cl"),
 		path.Join(cfg.BlobsPath, "l1_cl"), l1Genesis.Timestamp, cfg.DeployConfig.L1BlockTime)
 	t.Cleanup(func() {
 		_ = bcn.Close()
@@ -511,6 +550,7 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 	require.NoError(t, bcn.Start("127.0.0.1:0"))
 	beaconApiAddr := bcn.BeaconAddr()
 	require.NotEmpty(t, beaconApiAddr, "beacon API listener must be up")
+	sys.L1BeaconAPIAddr = beaconApiAddr
 
 	// Initialize nodes
 	l1Node, l1Backend, err := geth.InitL1(cfg.DeployConfig.L1ChainID, cfg.DeployConfig.L1BlockTime, l1Genesis, c,
@@ -560,9 +600,12 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 	// Configure connections to L1 and L2 for rollup nodes.
 	// TODO: refactor testing to allow use of in-process rpc connections instead
 	// of only websockets (which are required for external eth client tests).
-	for name, rollupCfg := range cfg.Nodes {
-		configureL1(rollupCfg, sys.EthInstances["l1"])
-		configureL2(rollupCfg, sys.EthInstances[name], cfg.JWTSecret)
+	for name, nodeCfg := range cfg.Nodes {
+		configureL1(nodeCfg, sys.EthInstances["l1"])
+		configureL2(nodeCfg, sys.EthInstances[name], cfg.JWTSecret)
+		if sys.RollupConfig.EcotoneTime != nil {
+			nodeCfg.Beacon = &rollupNode.L1BeaconEndpointConfig{BeaconAddr: sys.L1BeaconAPIAddr}
+		}
 	}
 
 	// Geth Clients
@@ -640,8 +683,7 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 	}
 
 	// Don't log state snapshots in test output
-	snapLog := log.New()
-	snapLog.SetHandler(log.DiscardHandler())
+	snapLog := log.NewLogger(log.DiscardHandler())
 
 	// Rollup nodes
 
@@ -727,17 +769,35 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 	}
 
 	// L2Output Submitter
-	proposerCLIConfig := &l2os.CLIConfig{
-		L1EthRpc:          sys.EthInstances["l1"].WSEndpoint(),
-		RollupRpc:         sys.RollupNodes["sequencer"].HTTPEndpoint(),
-		L2OOAddress:       config.L1Deployments.L2OutputOracleProxy.Hex(),
-		PollInterval:      50 * time.Millisecond,
-		TxMgrConfig:       newTxMgrConfig(sys.EthInstances["l1"].WSEndpoint(), cfg.Secrets.Proposer),
-		AllowNonFinalized: cfg.NonFinalizedProposals,
-		LogConfig: oplog.CLIConfig{
-			Level:  log.LvlInfo,
-			Format: oplog.FormatText,
-		},
+	var proposerCLIConfig *l2os.CLIConfig
+	if e2eutils.UseFPAC() {
+		proposerCLIConfig = &l2os.CLIConfig{
+			L1EthRpc:          sys.EthInstances["l1"].WSEndpoint(),
+			RollupRpc:         sys.RollupNodes["sequencer"].HTTPEndpoint(),
+			DGFAddress:        config.L1Deployments.DisputeGameFactoryProxy.Hex(),
+			ProposalInterval:  6 * time.Second,
+			DisputeGameType:   0,
+			PollInterval:      50 * time.Millisecond,
+			TxMgrConfig:       newTxMgrConfig(sys.EthInstances["l1"].WSEndpoint(), cfg.Secrets.Proposer),
+			AllowNonFinalized: cfg.NonFinalizedProposals,
+			LogConfig: oplog.CLIConfig{
+				Level:  log.LvlInfo,
+				Format: oplog.FormatText,
+			},
+		}
+	} else {
+		proposerCLIConfig = &l2os.CLIConfig{
+			L1EthRpc:          sys.EthInstances["l1"].WSEndpoint(),
+			RollupRpc:         sys.RollupNodes["sequencer"].HTTPEndpoint(),
+			L2OOAddress:       config.L1Deployments.L2OutputOracleProxy.Hex(),
+			PollInterval:      50 * time.Millisecond,
+			TxMgrConfig:       newTxMgrConfig(sys.EthInstances["l1"].WSEndpoint(), cfg.Secrets.Proposer),
+			AllowNonFinalized: cfg.NonFinalizedProposals,
+			LogConfig: oplog.CLIConfig{
+				Level:  log.LvlInfo,
+				Format: oplog.FormatText,
+			},
+		}
 	}
 	proposer, err := l2os.ProposerServiceFromCLIConfig(context.Background(), "0.0.1", proposerCLIConfig, sys.Cfg.Loggers["proposer"])
 	if err != nil {
@@ -752,31 +812,36 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 	if cfg.DeployConfig.L2GenesisDeltaTimeOffset != nil && *cfg.DeployConfig.L2GenesisDeltaTimeOffset == hexutil.Uint64(0) {
 		batchType = derive.SpanBatchType
 	}
+	// batcher defaults if unset
 	batcherMaxL1TxSizeBytes := cfg.BatcherMaxL1TxSizeBytes
 	if batcherMaxL1TxSizeBytes == 0 {
-		batcherMaxL1TxSizeBytes = 240_000
+		batcherMaxL1TxSizeBytes = 120_000
+	}
+	batcherTargetNumFrames := cfg.BatcherTargetNumFrames
+	if batcherTargetNumFrames == 0 {
+		batcherTargetNumFrames = 1
 	}
 	batcherCLIConfig := &bss.CLIConfig{
-		L1EthRpc:               sys.EthInstances["l1"].WSEndpoint(),
-		L2EthRpc:               sys.EthInstances["sequencer"].WSEndpoint(),
-		RollupRpc:              sys.RollupNodes["sequencer"].HTTPEndpoint(),
-		MaxPendingTransactions: 0,
-		MaxChannelDuration:     1,
-		MaxL1TxSize:            batcherMaxL1TxSizeBytes,
-		CompressorConfig: compressor.CLIConfig{
-			TargetL1TxSizeBytes: cfg.BatcherTargetL1TxSizeBytes,
-			TargetNumFrames:     1,
-			ApproxComprRatio:    0.4,
-		},
-		SubSafetyMargin: 4,
-		PollInterval:    50 * time.Millisecond,
-		TxMgrConfig:     newTxMgrConfig(sys.EthInstances["l1"].WSEndpoint(), cfg.Secrets.Batcher),
+		L1EthRpc:                 sys.EthInstances["l1"].WSEndpoint(),
+		L2EthRpc:                 sys.EthInstances["sequencer"].WSEndpoint(),
+		RollupRpc:                sys.RollupNodes["sequencer"].HTTPEndpoint(),
+		MaxPendingTransactions:   cfg.MaxPendingTransactions,
+		MaxChannelDuration:       1,
+		MaxL1TxSize:              batcherMaxL1TxSizeBytes,
+		TestUseMaxTxSizeForBlobs: cfg.BatcherUseMaxTxSizeForBlobs,
+		TargetNumFrames:          int(batcherTargetNumFrames),
+		ApproxComprRatio:         0.4,
+		SubSafetyMargin:          4,
+		PollInterval:             50 * time.Millisecond,
+		TxMgrConfig:              newTxMgrConfig(sys.EthInstances["l1"].WSEndpoint(), cfg.Secrets.Batcher),
 		LogConfig: oplog.CLIConfig{
-			Level:  log.LvlInfo,
+			Level:  log.LevelInfo,
 			Format: oplog.FormatText,
 		},
-		Stopped:   sys.Cfg.DisableBatcher, // Batch submitter may be enabled later
-		BatchType: batchType,
+		Stopped:              sys.Cfg.DisableBatcher, // Batch submitter may be enabled later
+		BatchType:            batchType,
+		DataAvailabilityType: sys.Cfg.DataAvailabilityType,
+		DaConfig:             celestia.CLIConfig{Rpc: "grpc://localhost:26650"},
 	}
 	// Batch Submitter
 	batcher, err := bss.BatcherServiceFromCLIConfig(context.Background(), "0.0.1", batcherCLIConfig, sys.Cfg.Loggers["batcher"])
@@ -834,6 +899,10 @@ func (sys *System) newMockNetPeer() (host.Host, error) {
 		return nil, err
 	}
 	return sys.Mocknet.AddPeerWithPeerstore(p, eps)
+}
+
+func (sys *System) BatcherHelper() *batcher.Helper {
+	return batcher.NewHelper(sys.t, sys.Cfg.Secrets.Batcher, sys.RollupConfig, sys.NodeClient("l1"))
 }
 
 func UseHTTP() bool {

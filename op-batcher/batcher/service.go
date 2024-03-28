@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	_ "net/http/pprof"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -15,27 +13,36 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 
+	"github.com/ethereum-optimism/optimism/op-batcher/flags"
 	"github.com/ethereum-optimism/optimism/op-batcher/metrics"
 	"github.com/ethereum-optimism/optimism/op-batcher/rpc"
 	celestia "github.com/ethereum-optimism/optimism/op-celestia"
+	"github.com/ethereum-optimism/optimism/op-node/chaincfg"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
+	plasma "github.com/ethereum-optimism/optimism/op-plasma"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 	"github.com/ethereum-optimism/optimism/op-service/dial"
+	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
-	oppprof "github.com/ethereum-optimism/optimism/op-service/pprof"
+	"github.com/ethereum-optimism/optimism/op-service/oppprof"
 	oprpc "github.com/ethereum-optimism/optimism/op-service/rpc"
 	"github.com/ethereum-optimism/optimism/op-service/txmgr"
 )
 
-var (
-	ErrAlreadyStopped = errors.New("already stopped")
-)
+var ErrAlreadyStopped = errors.New("already stopped")
 
 type BatcherConfig struct {
 	NetworkTimeout         time.Duration
 	PollInterval           time.Duration
 	MaxPendingTransactions uint64
+
+	// UseBlobs is true if the batcher should use blobs instead of calldata for posting blobs
+	UseBlobs bool
+
+	// UsePlasma is true if the rollup config has a DA challenge address so the batcher
+	// will post inputs to the Plasma DA server and post commitments to blobs or calldata.
+	UsePlasma bool
 }
 
 // BatcherService represents a full batch-submitter instance and its resources,
@@ -46,6 +53,7 @@ type BatcherService struct {
 	L1Client         *ethclient.Client
 	EndpointProvider dial.L2EndpointProvider
 	TxManager        txmgr.TxManager
+	PlasmaDA         *plasma.DAClient
 
 	BatcherConfig
 
@@ -58,13 +66,12 @@ type BatcherService struct {
 
 	Version string
 
-	pprofSrv   *httputil.HTTPServer
-	metricsSrv *httputil.HTTPServer
-	rpcServer  *oprpc.Server
+	pprofService *oppprof.Service
+	metricsSrv   *httputil.HTTPServer
+	rpcServer    *oprpc.Server
 
 	balanceMetricer io.Closer
-
-	stopped atomic.Bool
+	stopped         atomic.Bool
 
 	NotSubmittingOnStart bool
 	DAClient             *celestia.DAClient
@@ -91,7 +98,6 @@ func (bs *BatcherService) initFromCLIConfig(ctx context.Context, version string,
 	bs.PollInterval = cfg.PollInterval
 	bs.MaxPendingTransactions = cfg.MaxPendingTransactions
 	bs.NetworkTimeout = cfg.TxMgrConfig.NetworkTimeout
-
 	if err := bs.initRPCClients(ctx, cfg); err != nil {
 		return err
 	}
@@ -109,7 +115,14 @@ func (bs *BatcherService) initFromCLIConfig(ctx context.Context, version string,
 		return fmt.Errorf("failed to start metrics server: %w", err)
 	}
 	if err := bs.initPProf(cfg); err != nil {
-		return fmt.Errorf("failed to start pprof server: %w", err)
+		return fmt.Errorf("failed to init profiling: %w", err)
+	}
+	// init before driver
+	if err := bs.initPlasmaDA(cfg); err != nil {
+		return fmt.Errorf("failed to init plasma DA: %w", err)
+	}
+	if err := bs.initDA(cfg); err != nil {
+		return fmt.Errorf("failed to start da server: %w", err)
 	}
 	if err := bs.initDA(cfg); err != nil {
 		return fmt.Errorf("failed to start da server: %w", err)
@@ -135,7 +148,7 @@ func (bs *BatcherService) initRPCClients(ctx context.Context, cfg *CLIConfig) er
 	if strings.Contains(cfg.RollupRpc, ",") && strings.Contains(cfg.L2EthRpc, ",") {
 		rollupUrls := strings.Split(cfg.RollupRpc, ",")
 		ethUrls := strings.Split(cfg.L2EthRpc, ",")
-		endpointProvider, err = dial.NewActiveL2EndpointProvider(ctx, ethUrls, rollupUrls, dial.DefaultActiveSequencerFollowerCheckDuration, dial.DefaultDialTimeout, bs.Log)
+		endpointProvider, err = dial.NewActiveL2EndpointProvider(ctx, ethUrls, rollupUrls, cfg.ActiveSequencerCheckDuration, dial.DefaultDialTimeout, bs.Log)
 	} else {
 		endpointProvider, err = dial.NewStaticL2EndpointProvider(ctx, bs.Log, cfg.L2EthRpc, cfg.RollupRpc)
 	}
@@ -176,22 +189,62 @@ func (bs *BatcherService) initRollupConfig(ctx context.Context) error {
 	if err := bs.RollupConfig.Check(); err != nil {
 		return fmt.Errorf("invalid rollup config: %w", err)
 	}
+	bs.RollupConfig.LogDescription(bs.Log, chaincfg.L2ChainIDToNetworkDisplayName)
 	return nil
 }
 
 func (bs *BatcherService) initChannelConfig(cfg *CLIConfig) error {
-	bs.ChannelConfig = ChannelConfig{
+	cc := ChannelConfig{
 		SeqWindowSize:      bs.RollupConfig.SeqWindowSize,
 		ChannelTimeout:     bs.RollupConfig.ChannelTimeout,
 		MaxChannelDuration: cfg.MaxChannelDuration,
+		MaxFrameSize:       cfg.MaxL1TxSize - 1, // account for version byte prefix; reset for blobs
+		TargetNumFrames:    cfg.TargetNumFrames,
 		SubSafetyMargin:    cfg.SubSafetyMargin,
-		MaxFrameSize:       cfg.MaxL1TxSize - 1, // subtract 1 byte for version
-		CompressorConfig:   cfg.CompressorConfig.Config(),
 		BatchType:          cfg.BatchType,
 	}
-	if err := bs.ChannelConfig.Check(); err != nil {
+
+	switch cfg.DataAvailabilityType {
+	case flags.BlobsType:
+		if !cfg.TestUseMaxTxSizeForBlobs {
+			// account for version byte prefix
+			cc.MaxFrameSize = eth.MaxBlobDataSize - 1
+		}
+		cc.MultiFrameTxs = true
+		bs.UseBlobs = true
+	case flags.CalldataType:
+		bs.UseBlobs = false
+	default:
+		return fmt.Errorf("unknown data availability type: %v", cfg.DataAvailabilityType)
+	}
+
+	if bs.UsePlasma && cc.MaxFrameSize > plasma.MaxInputSize {
+		return fmt.Errorf("max frame size %d exceeds plasma max input size %d", cc.MaxFrameSize, plasma.MaxInputSize)
+	}
+
+	cc.InitCompressorConfig(cfg.ApproxComprRatio, cfg.Compressor)
+
+	if bs.UseBlobs && !bs.RollupConfig.IsEcotone(uint64(time.Now().Unix())) {
+		bs.Log.Error("Cannot use Blob data before Ecotone!") // log only, the batcher may not be actively running.
+	}
+	if !bs.UseBlobs && bs.RollupConfig.IsEcotone(uint64(time.Now().Unix())) {
+		bs.Log.Warn("Ecotone upgrade is active, but batcher is not configured to use Blobs!")
+	}
+
+	if err := cc.Check(); err != nil {
 		return fmt.Errorf("invalid channel configuration: %w", err)
 	}
+	bs.Log.Info("Initialized channel-config",
+		"use_blobs", bs.UseBlobs,
+		"use_plasma", bs.UsePlasma,
+		"max_frame_size", cc.MaxFrameSize,
+		"target_num_frames", cc.TargetNumFrames,
+		"compressor", cc.CompressorConfig.Kind,
+		"max_channel_duration", cc.MaxChannelDuration,
+		"channel_timeout", cc.ChannelTimeout,
+		"batch_type", cc.BatchType,
+		"sub_safety_margin", cc.SubSafetyMargin)
+	bs.ChannelConfig = cc
 	return nil
 }
 
@@ -205,16 +258,19 @@ func (bs *BatcherService) initTxManager(cfg *CLIConfig) error {
 }
 
 func (bs *BatcherService) initPProf(cfg *CLIConfig) error {
-	if !cfg.PprofConfig.Enabled {
-		return nil
+	bs.pprofService = oppprof.New(
+		cfg.PprofConfig.ListenEnabled,
+		cfg.PprofConfig.ListenAddr,
+		cfg.PprofConfig.ListenPort,
+		cfg.PprofConfig.ProfileType,
+		cfg.PprofConfig.ProfileDir,
+		cfg.PprofConfig.ProfileFilename,
+	)
+
+	if err := bs.pprofService.Start(); err != nil {
+		return fmt.Errorf("failed to start pprof service: %w", err)
 	}
-	log.Debug("starting pprof server", "addr", net.JoinHostPort(cfg.PprofConfig.ListenAddr, strconv.Itoa(cfg.PprofConfig.ListenPort)))
-	srv, err := oppprof.StartServer(cfg.PprofConfig.ListenAddr, cfg.PprofConfig.ListenPort)
-	if err != nil {
-		return err
-	}
-	bs.pprofSrv = srv
-	log.Info("started pprof server", "addr", srv.Addr())
+
 	return nil
 }
 
@@ -247,6 +303,7 @@ func (bs *BatcherService) initDriver() {
 		L1Client:         bs.L1Client,
 		EndpointProvider: bs.EndpointProvider,
 		ChannelConfig:    bs.ChannelConfig,
+		PlasmaDA:         bs.PlasmaDA,
 		DAClient:         bs.DAClient,
 	})
 }
@@ -271,8 +328,18 @@ func (bs *BatcherService) initRPCServer(cfg *CLIConfig) error {
 	return nil
 }
 
+func (bs *BatcherService) initPlasmaDA(cfg *CLIConfig) error {
+	config := cfg.PlasmaDA
+	if err := config.Check(); err != nil {
+		return err
+	}
+	bs.PlasmaDA = config.NewDAClient()
+	bs.UsePlasma = config.Enabled
+	return nil
+}
+
 func (bs *BatcherService) initDA(cfg *CLIConfig) error {
-	client, err := celestia.NewDAClient(cfg.DaConfig.DaRpc, bs.Metrics)
+	client, err := celestia.NewDAClient(cfg.DaConfig.Rpc, cfg.DaConfig.AuthToken, cfg.DaConfig.Namespace)
 	if err != nil {
 		return err
 	}
@@ -312,6 +379,12 @@ func (bs *BatcherService) Stop(ctx context.Context) error {
 	}
 	bs.Log.Info("Stopping batcher")
 
+	// close the TxManager first, so that new work is denied, in-flight work is cancelled as early as possible
+	// (transactions which are expected to be confirmed are still waited for)
+	if bs.TxManager != nil {
+		bs.TxManager.Close()
+	}
+
 	var result error
 	if bs.driver != nil {
 		if err := bs.driver.StopBatchSubmittingIfRunning(ctx); err != nil {
@@ -325,8 +398,8 @@ func (bs *BatcherService) Stop(ctx context.Context) error {
 			result = errors.Join(result, fmt.Errorf("failed to stop RPC server: %w", err))
 		}
 	}
-	if bs.pprofSrv != nil {
-		if err := bs.pprofSrv.Stop(ctx); err != nil {
+	if bs.pprofService != nil {
+		if err := bs.pprofService.Stop(ctx); err != nil {
 			result = errors.Join(result, fmt.Errorf("failed to stop PProf server: %w", err))
 		}
 	}
@@ -334,9 +407,6 @@ func (bs *BatcherService) Stop(ctx context.Context) error {
 		if err := bs.balanceMetricer.Close(); err != nil {
 			result = errors.Join(result, fmt.Errorf("failed to close balance metricer: %w", err))
 		}
-	}
-	if bs.TxManager != nil {
-		bs.TxManager.Close()
 	}
 
 	if bs.metricsSrv != nil {

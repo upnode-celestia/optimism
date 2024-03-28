@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.15;
 
-import "./DisputeTypes.sol";
+import "src/libraries/DisputeTypes.sol";
 
 ////////////////////////////////////////////////////////////////
 //                `DisputeGameFactory` Errors                 //
@@ -24,9 +24,17 @@ error UnexpectedRootClaim(Claim rootClaim);
 //                 `FaultDisputeGame` Errors                  //
 ////////////////////////////////////////////////////////////////
 
-/// @notice Thrown when a supplied bond is too low to cover the
-///         cost of the next possible counter claim.
-error BondTooLow();
+/// @notice Thrown when a dispute game has already been initialized.
+error AlreadyInitialized();
+
+/// @notice Thrown when a supplied bond is too low to cover the cost of the interaction.
+error InsufficientBond();
+
+/// @notice Thrown when a credit claim is attempted for a value of 0.
+error NoCreditToClaim();
+
+/// @notice Thrown when the transfer of credit to a recipient account reverts.
+error BondTransferFailed();
 
 /// @notice Thrown when the `extraData` passed to the CWIA proxy is too long for the `FaultDisputeGame`.
 error ExtraDataTooLong();
@@ -83,32 +91,16 @@ error ClaimAboveSplit();
 ///         depth of the game.
 error InvalidSplitDepth();
 
-////////////////////////////////////////////////////////////////
-//              `AttestationDisputeGame` Errors               //
-////////////////////////////////////////////////////////////////
+/// @notice Thrown when trying to step against a claim for a second time, after it has already been countered with
+///         an instruction step.
+error DuplicateStep();
 
-/// @notice Thrown when an invalid signature is submitted to `challenge`.
-error InvalidSignature();
-
-/// @notice Thrown when a signature that has already been used to support the
-///         `rootClaim` is submitted to `challenge`.
-error AlreadyChallenged();
+/// @notice Thrown when an anchor root is not found for a given game type.
+error AnchorRootNotFound();
 
 ////////////////////////////////////////////////////////////////
-//                      `Ownable` Errors                      //
+//              `PermissionedDisputeGame` Errors              //
 ////////////////////////////////////////////////////////////////
 
-/// @notice Thrown when a function that is protected by the `onlyOwner` modifier
-///          is called from an account other than the owner.
-error NotOwner();
-
-////////////////////////////////////////////////////////////////
-//                    `BlockOracle` Errors                    //
-////////////////////////////////////////////////////////////////
-
-/// @notice Thrown when a block that is out of the range of the `BLOCKHASH` opcode
-///         is attempted to be loaded.
-error BlockNumberOOB();
-
-/// @notice Thrown when a block hash is attempted to be loaded that has not been stored.
-error BlockHashNotPresent();
+/// @notice Thrown when an unauthorized address attempts to interact with the game.
+error BadAuth();
