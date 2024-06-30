@@ -716,16 +716,20 @@ func (m *SimpleTxManager) increaseGasPrice(ctx context.Context, tx *types.Transa
 // suggestGasPriceCaps suggests what the new tip, base fee, and blob base fee should be based on
 // the current L1 conditions. blobfee will be nil if 4844 is not yet active.
 func (m *SimpleTxManager) suggestGasPriceCaps(ctx context.Context) (*big.Int, *big.Int, *big.Int, error) {
+	// cCtx, cancel := context.WithTimeout(ctx, m.cfg.NetworkTimeout)
+	// defer cancel()
+	// tip, err := m.backend.SuggestGasTipCap(cCtx)
+	// if err != nil {
+	// 	m.metr.RPCError()
+	// 	return nil, nil, nil, fmt.Errorf("failed to fetch the suggested gas tip cap: %w", err)
+	// } else if tip == nil {
+	// 	return nil, nil, nil, errors.New("the suggested tip was nil")
+	// }
+
+	// Fix excessive gas tip cap for L3 chain
+	tip := big.NewInt(10000000)
+
 	cCtx, cancel := context.WithTimeout(ctx, m.cfg.NetworkTimeout)
-	defer cancel()
-	tip, err := m.backend.SuggestGasTipCap(cCtx)
-	if err != nil {
-		m.metr.RPCError()
-		return nil, nil, nil, fmt.Errorf("failed to fetch the suggested gas tip cap: %w", err)
-	} else if tip == nil {
-		return nil, nil, nil, errors.New("the suggested tip was nil")
-	}
-	cCtx, cancel = context.WithTimeout(ctx, m.cfg.NetworkTimeout)
 	defer cancel()
 	head, err := m.backend.HeaderByNumber(cCtx, nil)
 	if err != nil {
